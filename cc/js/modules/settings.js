@@ -53,6 +53,9 @@
       '.mod-knowledge .kn-red-del:hover{background:var(--bad-soft)}' +
       '.mod-knowledge .kn-ol{padding-left:20px;font-size:13px;line-height:1.8}' +
       '.mod-knowledge .kn-ol li{margin-bottom:6px}' +
+      '.mod-knowledge .kn-p-thumbs{display:flex;gap:6px;margin:10px 0 4px;align-items:center}' +
+      '.mod-knowledge .kn-p-thumbs img{width:86px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}' +
+      '.mod-knowledge .kn-p-more{font-size:12px;color:var(--muted);background:#f1f3f7;border-radius:8px;padding:24px 10px}' +
       '</style>' +
       '<div class="mod-knowledge">' +
       '<div class="notice">这里的内容 = 系统的大脑。把「资料模板」文件夹里的真实资料填好交给技术替换后，销冠辅助/初筛客服/技术分身全线生效。当前为示例数据。</div>' +
@@ -83,15 +86,32 @@
   function renderProducts(body) {
     var list = App.data.products;
     body.innerHTML =
+      '<div class="row-between mb12">' +
+      '<span class="small muted">共 ' + list.length + ' 个产品 · 图片与资料可自行维护，保存在本浏览器</span>' +
+      '<button class="btn btn-sm btn-primary" id="kn-p-add">＋ 新增产品</button>' +
+      '</div>' +
       '<div class="grid grid-2">' +
       list.map(function (p) {
-        var price = App.fmt.money(p.priceMin) + ' – ' + App.fmt.money(p.priceMax) +
-          ' <span class="muted small">（' + App.esc(p.priceNote) + '）</span>';
+        var price = p.priceMin == null ? '按图报价'
+          : App.fmt.money(p.priceMin) + ' – ' + App.fmt.money(p.priceMax) +
+            ' <span class="muted small">（' + App.esc(p.priceNote) + '）</span>';
         var floor = (p.floorPrice == null ? '面议' : '<b>' + App.fmt.money(p.floorPrice) + '</b>') +
           ' <span class="text-bad small">仅老板与销冠可见</span>';
+        var imgs = p.images || [];
+        var thumbs = imgs.length
+          ? '<div class="kn-p-thumbs">' +
+            imgs.slice(0, 4).map(function (src) { return '<img src="' + src + '" alt="">'; }).join('') +
+            (imgs.length > 4 ? '<span class="kn-p-more">+' + (imgs.length - 4) + '</span>' : '') +
+            '</div>'
+          : '';
         return '<div class="card mb0">' +
-          '<div class="card-title"><span>' + App.esc(p.name) + ' ' + App.ui.badge(p.tagline, 'accent') + '</span>' +
-          '<button class="btn btn-sm" data-edit-prod="' + App.esc(p.id) + '">编辑</button></div>' +
+          '<div class="card-title"><span>' + App.esc(p.name) + ' ' + App.ui.badge(p.tagline, 'accent') +
+          (p.custom ? ' ' + App.ui.badge('自定义', 'purple') : '') + '</span>' +
+          '<span class="row">' +
+          '<button class="btn btn-sm" data-edit-prod="' + App.esc(p.id) + '">编辑</button>' +
+          (p.custom ? '<button class="btn btn-sm btn-danger" data-del-prod="' + App.esc(p.id) + '">删除</button>' : '') +
+          '</span></div>' +
+          thumbs +
           '<dl class="kv">' +
           kvRow('面积', App.esc(p.area)) +
           kvRow('布局', App.esc(p.layout)) +
@@ -110,52 +130,177 @@
       }).join('') +
       '</div>';
 
+    body.querySelector('#kn-p-add').onclick = function () {
+      openProductEditor(null, function () { render(rootEl); });
+    };
     body.querySelectorAll('[data-edit-prod]').forEach(function (btn) {
       btn.onclick = function () {
-        var id = btn.getAttribute('data-edit-prod');
-        var p = null;
-        App.data.products.forEach(function (x) { if (x.id === id) p = x; });
-        if (p) openProductModal(p);
+        openProductEditor(btn.getAttribute('data-edit-prod'), function () { render(rootEl); });
       };
+    });
+    body.querySelectorAll('[data-del-prod]').forEach(function (btn) {
+      btn.onclick = function () { deleteProduct(btn.getAttribute('data-del-prod')); };
     });
   }
 
-  function openProductModal(p) {
-    App.ui.modal('编辑产品：' + p.id,
-      '<div class="field"><label class="field-label">产品名称</label>' +
-      '<input class="input" id="kn-p-name" value="' + App.esc(p.name) + '"></div>' +
-      '<div class="row">' +
-      '<div class="field" style="flex:1"><label class="field-label">价格区间下限（USD）</label>' +
-      '<input class="input" id="kn-p-min" type="number" value="' + App.esc(p.priceMin) + '"></div>' +
-      '<div class="field" style="flex:1"><label class="field-label">价格区间上限（USD）</label>' +
-      '<input class="input" id="kn-p-max" type="number" value="' + App.esc(p.priceMax) + '"></div>' +
-      '</div>' +
-      '<div class="field"><label class="field-label">选配项</label>' +
-      '<textarea class="textarea" id="kn-p-opt">' + App.esc(p.options) + '</textarea></div>' +
-      '<div class="muted small">其余字段（结构/认证/底价等）演示版不开放编辑，正式版由「资料模板」统一维护并需权限审批。</div>',
-      '<button class="btn" id="kn-p-cancel">取消</button>' +
-      '<button class="btn btn-primary" id="kn-p-save">保存</button>');
+  function findProduct(id) {
+    var p = null;
+    App.data.products.forEach(function (x) { if (x.id === id) p = x; });
+    return p;
+  }
 
-    document.getElementById('kn-p-cancel').onclick = App.ui.closeModal;
-    document.getElementById('kn-p-save').onclick = function () {
-      var name = document.getElementById('kn-p-name').value.trim();
-      var min = parseFloat(document.getElementById('kn-p-min').value);
-      var max = parseFloat(document.getElementById('kn-p-max').value);
-      var opt = document.getElementById('kn-p-opt').value.trim();
-      if (!name) { App.ui.toast('产品名称不能为空', 'bad'); return; }
-      if (isNaN(min) || isNaN(max) || min <= 0 || max < min) {
-        App.ui.toast('价格区间不合法：下限需大于 0 且上限不低于下限', 'bad');
-        return;
-      }
-      p.name = name;
-      p.priceMin = min;
-      p.priceMax = max;
-      p.options = opt;
+  function deleteProduct(id) {
+    var p = findProduct(id);
+    if (!p) return;
+    App.ui.modal('删除产品',
+      '<div class="notice">确定删除产品「' + App.esc(p.name) + '」吗？删除后无法找回（已生成的视频不受影响）。</div>',
+      '<button class="btn" id="kn-pd-cancel">取消</button>' +
+      '<button class="btn btn-danger" id="kn-pd-ok">删除</button>');
+    document.getElementById('kn-pd-cancel').onclick = App.ui.closeModal;
+    document.getElementById('kn-pd-ok').onclick = function () {
+      var i = App.data.products.indexOf(p);
+      if (i >= 0) App.data.products.splice(i, 1);
+      App.persist();
       App.ui.closeModal();
-      App.ui.toast('已保存（演示内存生效）。正式版将写入知识库并同步全部 AI 模块', 'ok');
+      App.ui.toast('已删除产品「' + p.name + '」');
       render(rootEl);
     };
   }
+
+  /* ---- 产品编辑器（新增/编辑，含图片上传）。也供视频工厂调用 ---- */
+  function openProductEditor(id, onSaved) {
+    var isNew = !id;
+    var orig = isNew ? null : findProduct(id);
+    if (!isNew && !orig) return;
+    var draft = isNew
+      ? { id: '', name: '', tagline: '', area: '', layout: '', structure: '', electric: '', bathroom: '',
+          priceMin: null, priceMax: null, priceNote: 'FOB 青岛', floorPrice: null, moq: '', leadTime: '',
+          cert: '', packing: '', warranty: '', options: '', images: [], custom: true }
+      : JSON.parse(JSON.stringify(orig));
+    if (!draft.images) draft.images = [];
+
+    function fieldHtml(label, fid, val, ph, extra) {
+      return '<div class="field"><label class="field-label">' + label + '</label>' +
+        '<input class="input" id="' + fid + '" placeholder="' + App.esc(ph || '') + '" value="' + App.esc(val == null ? '' : val) + '"' + (extra || '') + '></div>';
+    }
+
+    App.ui.modal(
+      isNew ? '新增产品' : '编辑产品：' + orig.id,
+      '<style>' +
+      '.kn-pe-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}' +
+      '.kn-pe-imgs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}' +
+      '.kn-pe-img{position:relative;width:96px;height:72px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}' +
+      '.kn-pe-img img{width:100%;height:100%;object-fit:cover;display:block}' +
+      '.kn-pe-img .x{position:absolute;top:3px;right:3px;background:rgba(0,0,0,.55);color:#fff;border-radius:50%;width:18px;height:18px;line-height:18px;text-align:center;font-size:11px;cursor:pointer}' +
+      '.kn-pe-img .cov{position:absolute;left:0;bottom:0;background:rgba(37,99,235,.85);color:#fff;font-size:10px;padding:1px 6px;border-radius:0 6px 0 0}' +
+      '</style>' +
+      '<div class="field"><label class="field-label">产品图片（第一张为封面，将用于视频分镜素材与视频仓库封面）</label>' +
+      '<div class="kn-pe-imgs" id="kn-pe-imgs"></div>' +
+      '<button class="btn btn-sm" id="kn-pe-img-add">＋ 上传图片</button>' +
+      '<input type="file" id="kn-pe-file" accept="image/*" multiple style="display:none">' +
+      '<div class="small muted mt8">图片自动压缩后保存在浏览器；部署服务器后将上传至服务器，全公司共享。</div>' +
+      '</div>' +
+      '<div class="kn-pe-grid">' +
+      fieldHtml('型号/编号 *', 'kn-pe-id', draft.id, '例如：EH-30', isNew ? '' : ' disabled') +
+      fieldHtml('产品名称 *', 'kn-pe-name', draft.name, '例如：EH-30 可扩展集装箱房') +
+      fieldHtml('一句话卖点', 'kn-pe-tagline', draft.tagline, '例如：新款 · 双层扩展') +
+      fieldHtml('面积', 'kn-pe-area', draft.area, '例如：展开约 40㎡') +
+      fieldHtml('布局', 'kn-pe-layout', draft.layout, '例如：2卧 + 1卫 + 厨房') +
+      fieldHtml('交期', 'kn-pe-leadtime', draft.leadTime, '例如：样品 15 天，批量 30 天') +
+      fieldHtml('价格下限（USD，可留空）', 'kn-pe-min', draft.priceMin, '例如：8500', ' type="number"') +
+      fieldHtml('价格上限（USD，可留空）', 'kn-pe-max', draft.priceMax, '例如：13500', ' type="number"') +
+      fieldHtml('MOQ', 'kn-pe-moq', draft.moq, '例如：1 套可下样品单') +
+      fieldHtml('质保', 'kn-pe-warranty', draft.warranty, '例如：主结构 10 年') +
+      '</div>' +
+      '<div class="field"><label class="field-label">选配项</label>' +
+      '<textarea class="textarea" id="kn-pe-opt">' + App.esc(draft.options) + '</textarea></div>' +
+      (isNew ? '' : '<div class="muted small">结构/水电/认证/底价等字段由「资料模板」统一维护，此处不开放编辑。</div>'),
+      '<button class="btn" id="kn-pe-cancel">取消</button>' +
+      '<button class="btn btn-primary" id="kn-pe-save">' + (isNew ? '创建产品' : '保存修改') + '</button>',
+      { large: true });
+
+    /* 图片列表 */
+    function renderImgs() {
+      var box = document.getElementById('kn-pe-imgs');
+      box.innerHTML = draft.images.map(function (src, i) {
+        return '<div class="kn-pe-img"><img src="' + src + '" alt="">' +
+          (i === 0 ? '<span class="cov">封面</span>' : '') +
+          '<span class="x" data-x="' + i + '" title="删除">✕</span></div>';
+      }).join('') || '<span class="small muted">暂无图片</span>';
+      box.querySelectorAll('[data-x]').forEach(function (x) {
+        x.onclick = function () {
+          draft.images.splice(parseInt(x.getAttribute('data-x'), 10), 1);
+          renderImgs();
+        };
+      });
+    }
+    renderImgs();
+
+    document.getElementById('kn-pe-img-add').onclick = function () {
+      document.getElementById('kn-pe-file').click();
+    };
+    document.getElementById('kn-pe-file').onchange = function () {
+      var files = Array.prototype.slice.call(this.files || []);
+      this.value = '';
+      if (!files.length) return;
+      App.ui.toast('正在压缩 ' + files.length + ' 张图片…');
+      Promise.all(files.map(function (f) {
+        return App.img.readAndShrink(f).catch(function () { return null; });
+      })).then(function (urls) {
+        if (!document.getElementById('kn-pe-imgs')) return; // 弹窗已关闭
+        var ok = urls.filter(Boolean);
+        draft.images = draft.images.concat(ok);
+        renderImgs();
+        if (ok.length < files.length) App.ui.toast((files.length - ok.length) + ' 张图片读取失败，已跳过', 'bad');
+      });
+    };
+
+    /* 取消 / 保存 */
+    document.getElementById('kn-pe-cancel').onclick = App.ui.closeModal;
+    document.getElementById('kn-pe-save').onclick = function () {
+      var pid = document.getElementById('kn-pe-id').value.trim();
+      var name = document.getElementById('kn-pe-name').value.trim();
+      if (!pid) { App.ui.toast('请填写型号/编号', 'bad'); return; }
+      if (!name) { App.ui.toast('请填写产品名称', 'bad'); return; }
+      if (isNew && findProduct(pid)) { App.ui.toast('型号「' + pid + '」已存在，请换一个', 'bad'); return; }
+      var minRaw = document.getElementById('kn-pe-min').value.trim();
+      var maxRaw = document.getElementById('kn-pe-max').value.trim();
+      var min = minRaw === '' ? null : parseFloat(minRaw);
+      var max = maxRaw === '' ? null : parseFloat(maxRaw);
+      if ((min == null) !== (max == null)) { App.ui.toast('价格上下限请同时填写或同时留空', 'bad'); return; }
+      if (min != null && (isNaN(min) || isNaN(max) || min <= 0 || max < min)) {
+        App.ui.toast('价格区间不合法：下限需大于 0 且上限不低于下限', 'bad'); return;
+      }
+
+      draft.id = pid;
+      draft.name = name;
+      draft.tagline = document.getElementById('kn-pe-tagline').value.trim();
+      draft.area = document.getElementById('kn-pe-area').value.trim();
+      draft.layout = document.getElementById('kn-pe-layout').value.trim();
+      draft.leadTime = document.getElementById('kn-pe-leadtime').value.trim();
+      draft.priceMin = min;
+      draft.priceMax = max;
+      draft.moq = document.getElementById('kn-pe-moq').value.trim();
+      draft.warranty = document.getElementById('kn-pe-warranty').value.trim();
+      draft.options = document.getElementById('kn-pe-opt').value.trim();
+
+      var saved;
+      if (isNew) {
+        App.data.products.push(draft);
+        saved = draft;
+      } else {
+        Object.keys(draft).forEach(function (k) { orig[k] = draft[k]; });
+        saved = orig;
+      }
+      App.persist();
+      App.ui.closeModal();
+      App.ui.toast(isNew ? '已创建产品「' + name + '」' : '已保存「' + name + '」', 'ok');
+      if (onSaved) onSaved(saved);
+    };
+  }
+
+  // 暴露给其他模块（视频工厂向导里可直接新增产品）
+  App.openProductEditor = openProductEditor;
 
   /* ========== Tab 2：FAQ 库 ========== */
   function renderFaq(body) {

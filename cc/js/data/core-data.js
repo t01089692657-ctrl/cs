@@ -428,13 +428,20 @@ window.AppData = {
     }
   ],
 
+  /* 视频项目：用于视频仓库按项目归类管理生成的视频 */
+  videoProjects: [
+    { id: 'vp1', name: '视频号日更' },
+    { id: 'vp2', name: '美国营地主投放素材' },
+    { id: 'vp3', name: '产品发布' }
+  ],
+
   videoQueue: [
-    { id: 'v1', title: 'EH-20 德州营地案例(英文版)', template: '客户案例故事型', status: '已发布', date: '7月1日', views: 12400, likes: 380, leads: 5 },
-    { id: 'v2', title: '30秒安装延时 · 卡点版', template: '30秒安装延时型', status: '已发布', date: '6月30日', views: 45200, likes: 1520, leads: 9 },
-    { id: 'v3', title: '为什么民宿扩建总超预算', template: '痛点字幕解说型', status: '已发布', date: '6月28日', views: 8900, likes: 210, leads: 2 },
-    { id: 'v4', title: '工厂流水线快剪 7月版', template: '工厂流水线快剪型', status: '待审核', date: '今天', views: 0, likes: 0, leads: 0 },
-    { id: 'v5', title: 'EH-40 三卧两卫内部实拍', template: '产品360°展开演示型', status: '待审核', date: '今天', views: 0, likes: 0, leads: 0 },
-    { id: 'v6', title: 'FD-13 咖啡亭改装脑洞篇', template: '痛点字幕解说型', status: '草稿', date: '昨天', views: 0, likes: 0, leads: 0 }
+    { id: 'v1', title: 'EH-20 德州营地案例(英文版)', template: '客户案例故事型', project: 'vp2', product: 'EH-20', status: '已发布', date: '7月1日', views: 12400, likes: 380, leads: 5 },
+    { id: 'v2', title: '30秒安装延时 · 卡点版', template: '30秒安装延时型', project: 'vp2', product: 'EH-20', status: '已发布', date: '6月30日', views: 45200, likes: 1520, leads: 9 },
+    { id: 'v3', title: '为什么民宿扩建总超预算', template: '痛点字幕解说型', project: 'vp1', product: 'EH-20', status: '已发布', date: '6月28日', views: 8900, likes: 210, leads: 2 },
+    { id: 'v4', title: '工厂流水线快剪 7月版', template: '工厂流水线快剪型', project: 'vp1', product: 'EH-20', status: '待审核', date: '今天', views: 0, likes: 0, leads: 0 },
+    { id: 'v5', title: 'EH-40 三卧两卫内部实拍', template: '产品360°展开演示型', project: 'vp3', product: 'EH-40', status: '待审核', date: '今天', views: 0, likes: 0, leads: 0 },
+    { id: 'v6', title: 'FD-13 咖啡亭改装脑洞篇', template: '痛点字幕解说型', project: 'vp1', product: 'FD-13', status: '草稿', date: '昨天', views: 0, likes: 0, leads: 0 }
   ],
 
   /* ---------- 广告投放 ---------- */

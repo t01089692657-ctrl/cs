@@ -29,12 +29,75 @@ window.App = (function () {
   };
 
   /* ---------- 启动 & 路由 ---------- */
+  // 模块可注册数据就绪回调（App.data 赋值并加载持久化数据后、首次路由前执行）
+  var dataHooks = [];
+  App.onDataReady = function (fn) { dataHooks.push(fn); };
+
   App.start = function () {
     App.data = window.AppData;
+    loadPersisted();
+    dataHooks.forEach(function (fn) {
+      try { fn(); } catch (e) { console.warn('onDataReady 回调出错:', e); }
+    });
     document.getElementById('company-name').textContent = App.data.company.name;
     buildNav();
     window.addEventListener('hashchange', route);
     route();
+  };
+
+  /* ---------- 数据持久化（浏览器 localStorage，原型阶段） ----------
+   * 产品库 / 视频仓库 / 视频项目的用户修改保存在本浏览器，刷新不丢。
+   * 正式版部署服务器后替换为后端数据库，全公司共享。
+   */
+  var PERSIST_KEYS = ['products', 'videoQueue', 'videoProjects'];
+  var PERSIST_STORE = 'app_data_v1';
+
+  function loadPersisted() {
+    var s = null;
+    try { s = JSON.parse(localStorage.getItem(PERSIST_STORE) || 'null'); } catch (e) { s = null; }
+    if (!s) return;
+    PERSIST_KEYS.forEach(function (k) {
+      if (s[k] && s[k].length) App.data[k] = s[k];
+    });
+  }
+
+  App.persist = function () {
+    try {
+      var s = {};
+      PERSIST_KEYS.forEach(function (k) { s[k] = App.data[k]; });
+      localStorage.setItem(PERSIST_STORE, JSON.stringify(s));
+      return true;
+    } catch (e) {
+      App.ui.toast('浏览器存储空间不足，本次修改可能在刷新后丢失。建议删除部分产品图片。', 'bad');
+      return false;
+    }
+  };
+
+  /* ---------- 图片工具：读取本地图片并压缩为 dataURL ---------- */
+  App.img = {};
+  // file -> Promise<dataURL>（等比缩到 maxSide 内，JPEG 压缩，控制 localStorage 占用）
+  App.img.readAndShrink = function (file, maxSide) {
+    maxSide = maxSide || 640;
+    return new Promise(function (resolve, reject) {
+      if (!file || !/^image\//.test(file.type)) { reject(new Error('不是图片文件')); return; }
+      var fr = new FileReader();
+      fr.onerror = function () { reject(new Error('读取文件失败')); };
+      fr.onload = function () {
+        var img = new Image();
+        img.onerror = function () { reject(new Error('图片解析失败')); };
+        img.onload = function () {
+          var w = img.width, h = img.height;
+          var scale = Math.min(1, maxSide / Math.max(w, h));
+          var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+          var cv = document.createElement('canvas');
+          cv.width = cw; cv.height = ch;
+          cv.getContext('2d').drawImage(img, 0, 0, cw, ch);
+          resolve(cv.toDataURL('image/jpeg', 0.78));
+        };
+        img.src = fr.result;
+      };
+      fr.readAsDataURL(file);
+    });
   };
 
   App.navigate = function (id) {

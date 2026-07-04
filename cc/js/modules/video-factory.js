@@ -1,6 +1,7 @@
 /* ============ 模块：视频号视频工厂 ============
  * 定位：企业不拍摄、不出镜，用固定模板 + 产品素材批量产出营销视频，投喂视频号。
- * 数据来源：App.data.videoTemplates / App.data.videoQueue / App.data.products / App.data.kpis
+ * 数据来源：App.data.videoTemplates / App.data.videoQueue / App.data.videoProjects / App.data.products / App.data.kpis
+ * 三个页签：模板库（可编辑/新建模板、挂案例视频）| AI 生成向导 | 视频仓库（按项目管理生成的视频）
  * 约定：IIFE 包裹、样式前缀 .mod-video-factory、事件绑定在 innerHTML 之后。
  */
 (function () {
@@ -18,9 +19,19 @@
   };
 
   /* ---------- 模块私有状态 ---------- */
-  var state = { tab: 'tpl' };            // tpl | wiz | queue
+  var state = { tab: 'tpl', projFilter: 'all' };   // tpl | wiz | queue
   var wiz = newWiz();
   var rootEl = null;
+
+  /* ---------- 生成 API 配置（原型阶段占位，部署服务器后接真实视频生成 API） ---------- */
+  var API_STORE = 'vf_api_config_v1';
+  function getApiConfig() {
+    try { return JSON.parse(localStorage.getItem(API_STORE) || 'null'); } catch (e) { return null; }
+  }
+  function apiConfigured() {
+    var c = getApiConfig();
+    return !!(c && c.url);
+  }
 
   /* ---------- 模板持久化（浏览器 localStorage，原型阶段） ----------
    * 用户对模板的编辑/新增/删除保存在本浏览器，刷新不丢；
@@ -37,7 +48,8 @@
     factoryTpls = JSON.parse(JSON.stringify(App.data.videoTemplates));
     var stored = null;
     try { stored = JSON.parse(localStorage.getItem(TPL_KEY) || 'null'); } catch (e) { stored = null; }
-    if (!stored || !stored.templates || !stored.templates.length) return;
+    // 注意：空数组也是有效的工作副本（用户把模板全删了），只有「从未存过」才用内置数据
+    if (!stored || !Array.isArray(stored.templates)) return;
     deletedIds = stored.deleted || [];
     var have = {};
     stored.templates.forEach(function (t) { have[t.id] = true; });
@@ -55,7 +67,13 @@
   }
 
   function newWiz() {
-    return { step: 1, templateId: null, productId: null, points: [], lang: '双语', rows: null };
+    return { step: 1, templateId: null, productId: null, points: [], lang: '双语', rows: null, projectId: null, newProjName: '' };
+  }
+
+  function findProject(id) {
+    var list = App.data.videoProjects || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
   }
 
   function findTemplate(id) {
@@ -85,7 +103,7 @@
     var tabs = [
       { key: 'tpl', label: '模板库' },
       { key: 'wiz', label: 'AI 生成向导' },
-      { key: 'queue', label: '视频队列' }
+      { key: 'queue', label: '视频仓库' }
     ];
 
     rootEl.innerHTML =
@@ -102,8 +120,9 @@
       '.mod-video-factory .vf-ta:focus{border-color:var(--accent);outline:none}' +
       '.mod-video-factory .vf-sb td{vertical-align:top}' +
       '.mod-video-factory .vf-videos{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}' +
-      '.mod-video-factory .vf-vid-btn{border-color:var(--ok);color:var(--ok);background:var(--ok-soft)}' +
+      '.mod-video-factory .vf-vid-btn{border-color:var(--ok);color:var(--ok);background:var(--ok-soft);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '.mod-video-factory .vf-vid-btn:hover{background:var(--ok);color:#fff}' +
+      '.mod-video-factory .vf-tpl .card-title{flex-wrap:wrap;gap:4px}' +
       /* 模板编辑弹窗（渲染在 modal-root，样式全局生效，用 .vf-form 前缀隔离） */
       '.vf-form .vf-f-grid{display:grid;grid-template-columns:1fr 140px;gap:10px}' +
       '.vf-form .vf-f-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}' +
@@ -254,6 +273,7 @@
       var i = list.indexOf(t);
       if (i >= 0) list.splice(i, 1);
       if (!t.custom && deletedIds.indexOf(id) < 0) deletedIds.push(id);
+      if (wiz.templateId === id) { wiz.templateId = null; wiz.rows = null; } // 向导若选中该模板则重置
       saveTemplates();
       App.ui.closeModal();
       drawBody();
@@ -528,16 +548,24 @@
     var langs = ['中文', '英文', '双语'];
     return '<div class="small muted mb12">第二步：选择产品（单选）、勾选要突出的卖点、选择字幕语言</div>' +
 
-      '<div class="field-label">产品</div>' +
+      '<div class="field-label">产品（图片在「知识库与配置 → 产品知识库」维护，将作为视频素材与封面）</div>' +
       '<div class="grid grid-2 mb12">' +
       App.data.products.map(function (p) {
         var on = wiz.productId === p.id;
         var price = p.priceMin != null ? App.fmt.money(p.priceMin) + ' – ' + App.fmt.money(p.priceMax) : '按图报价';
+        var cover = (p.images && p.images[0])
+          ? '<img src="' + p.images[0] + '" alt="" style="width:72px;height:54px;object-fit:cover;border-radius:8px;flex-shrink:0">'
+          : '<div style="width:72px;height:54px;border-radius:8px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">📦</div>';
         return '<div class="vf-choice' + (on ? ' on' : '') + '" data-pid="' + App.esc(p.id) + '">' +
+          '<div class="row" style="align-items:flex-start">' + cover +
+          '<div style="flex:1;min-width:0">' +
           '<div class="row-between"><b>' + App.esc(p.name) + '</b>' + App.ui.badge(p.tagline, on ? 'accent' : 'gray') + '</div>' +
-          '<div class="small muted mt8">' + price + ' · ' + App.esc(p.leadTime) + '</div>' +
+          '<div class="small muted mt8">' + price + ' · ' + App.esc(p.leadTime) +
+          (p.images && p.images.length ? ' · 图片 ' + p.images.length + ' 张' : ' · <span class="text-warn">暂无图片</span>') + '</div>' +
+          '</div></div>' +
           '</div>';
       }).join('') +
+      '<div class="vf-choice" id="vf-prod-add" style="display:flex;align-items:center;justify-content:center;min-height:78px;color:var(--accent);font-weight:600">＋ 新增产品（上传产品图片）</div>' +
       '</div>' +
 
       '<div class="field-label">突出卖点（可多选）</div>' +
@@ -589,18 +617,36 @@
     var t = findTemplate(wiz.templateId);
     var p = findProduct(wiz.productId);
     var title = (p ? p.name : '') + ' · ' + (t ? t.name : '');
-    return '<div class="small muted mb12">第四步：确认信息并提交合成</div>' +
+    var projects = App.data.videoProjects || [];
+    if (!wiz.projectId) wiz.projectId = projects.length ? projects[0].id : '__new';
+    var cover = (p && p.images && p.images[0])
+      ? '<img src="' + p.images[0] + '" alt="" style="width:120px;height:90px;object-fit:cover;border-radius:8px">'
+      : '<span class="muted small">产品暂无图片，封面待生成</span>';
+    return '<div class="small muted mb12">第四步：确认信息、选择归属项目并提交合成</div>' +
       '<div class="ai-box mb12">' +
       '<dl class="kv">' +
       '<dt>视频标题</dt><dd><b>' + App.esc(title) + '</b></dd>' +
       '<dt>模板</dt><dd>' + App.esc(t ? t.name + '（' + t.duration + '）' : '-') + '</dd>' +
       '<dt>产品</dt><dd>' + App.esc(p ? p.name : '-') + '</dd>' +
+      '<dt>封面预览</dt><dd>' + cover + '</dd>' +
       '<dt>突出卖点</dt><dd>' + (wiz.points.length ? wiz.points.map(function (sp) { return App.ui.badge(sp, 'accent'); }).join(' ') : '<span class="muted">未勾选</span>') + '</dd>' +
       '<dt>字幕语言</dt><dd>' + App.esc(wiz.lang) + '</dd>' +
       '<dt>分镜数</dt><dd>' + (wiz.rows ? wiz.rows.length + ' 组' : '-') + '</dd>' +
       '</dl>' +
       '</div>' +
-      '<div class="notice">提交后视频进入合成队列，状态为「待审核」，人工审核通过后才会发布到视频号。</div>' +
+      '<div class="field" style="max-width:340px">' +
+      '<label class="field-label">归属项目（在「视频仓库」中按项目管理）</label>' +
+      '<select class="select" id="vf-proj">' +
+      projects.map(function (pj) {
+        return '<option value="' + App.esc(pj.id) + '"' + (wiz.projectId === pj.id ? ' selected' : '') + '>' + App.esc(pj.name) + '</option>';
+      }).join('') +
+      '<option value="__new"' + (wiz.projectId === '__new' ? ' selected' : '') + '>＋ 新建项目…</option>' +
+      '</select>' +
+      '<input class="input mt8" id="vf-proj-new" placeholder="输入新项目名称" value="' + App.esc(wiz.newProjName) + '"' +
+      (wiz.projectId === '__new' ? '' : ' style="display:none"') + '>' +
+      '</div>' +
+      '<div class="notice">提交后视频进入合成队列，状态为「待审核」，人工审核通过后才会发布到视频号。' +
+      (apiConfigured() ? '' : ' 当前未配置生成 API（可在「视频仓库」右上角配置），提交仅做演示，不产生真实视频文件。') + '</div>' +
       '<div class="row mt16" style="justify-content:space-between">' +
       '<button class="btn" id="vf-prev-4">← 上一步</button>' +
       '<button class="btn btn-ok" id="vf-submit">🚀 提交合成</button>' +
@@ -618,7 +664,7 @@
     });
     var next1 = body.querySelector('#vf-next-1');
     if (next1) next1.onclick = function () {
-      if (!wiz.templateId) { App.ui.toast('请先选择一个模板', 'bad'); return; }
+      if (!findTemplate(wiz.templateId)) { App.ui.toast('请先选择一个模板', 'bad'); return; }
       wiz.step = 2; drawBody();
     };
 
@@ -630,6 +676,15 @@
         drawBody();
       };
     });
+    var prodAdd = body.querySelector('#vf-prod-add');
+    if (prodAdd) prodAdd.onclick = function () {
+      if (!App.openProductEditor) return;
+      App.openProductEditor(null, function (saved) {
+        wiz.productId = saved.id;   // 新建后自动选中
+        wiz.rows = null;
+        drawBody();
+      });
+    };
     body.querySelectorAll('.vf-chk').forEach(function (lb) {
       var sp = lb.getAttribute('data-sp');
       var cb = lb.querySelector('input');
@@ -647,7 +702,7 @@
     if (prev2) prev2.onclick = function () { wiz.step = 1; drawBody(); };
     var next2 = body.querySelector('#vf-next-2');
     if (next2) next2.onclick = function () {
-      if (!wiz.productId) { App.ui.toast('请先选择一个产品', 'bad'); return; }
+      if (!findProduct(wiz.productId)) { App.ui.toast('请先选择一个产品', 'bad'); return; }
       wiz.step = 3; drawBody();
     };
 
@@ -666,6 +721,14 @@
     // 第④步
     var prev4 = body.querySelector('#vf-prev-4');
     if (prev4) prev4.onclick = function () { wiz.step = 3; drawBody(); };
+    var projSel = body.querySelector('#vf-proj');
+    if (projSel) projSel.onchange = function () {
+      wiz.projectId = projSel.value;
+      var inp = body.querySelector('#vf-proj-new');
+      if (inp) inp.style.display = projSel.value === '__new' ? '' : 'none';
+    };
+    var projNew = body.querySelector('#vf-proj-new');
+    if (projNew) projNew.oninput = function () { wiz.newProjName = projNew.value; };
     var submit = body.querySelector('#vf-submit');
     if (submit) submit.onclick = submitVideo;
   }
@@ -728,6 +791,8 @@
     await App.ai.delay(1600);
     stop();
     btn.disabled = false;
+    // 等待期间用户切走了页签/模块：放弃本次生成，避免结果写进已卸载的界面
+    if (!document.contains(box)) return;
 
     wiz.rows = buildRows();
     if (!wiz.rows) { App.ui.toast('生成失败：模板或产品数据缺失', 'bad'); return; }
@@ -740,6 +805,7 @@
 
     var note = '已基于「' + (t ? t.name : '') + '」为 ' + (p ? p.name : '') + ' 生成 ' + wiz.rows.length +
       ' 组分镜，字幕语言：' + wiz.lang +
+      (p && p.images && p.images.length ? '，将调用产品图片 ' + p.images.length + ' 张作为画面素材' : '，该产品暂无图片，建议先到产品库上传实拍图') +
       (wiz.points.length ? '，已融入卖点：' + wiz.points.join('、') : '') +
       '。字幕单元格可直接编辑，改完进入下一步提交合成。';
     await App.ai.typeInto(box.querySelector('#vf-gen-note'), note);
@@ -784,62 +850,282 @@
     var t = findTemplate(wiz.templateId);
     var p = findProduct(wiz.productId);
     if (!t || !p || !wiz.rows) { App.ui.toast('信息不完整，无法提交', 'bad'); return; }
+
+    // 归属项目：选了「新建项目」则先创建
+    var projectId = wiz.projectId;
+    if (projectId === '__new') {
+      var name = (wiz.newProjName || '').trim();
+      if (!name) { App.ui.toast('请填写新项目名称', 'bad'); return; }
+      var proj = { id: 'vp' + Date.now(), name: name };
+      App.data.videoProjects.push(proj);
+      projectId = proj.id;
+    }
+
     App.data.videoQueue.unshift({
       id: 'v' + Date.now(),
       title: p.name + ' · ' + t.name,
       template: t.name,
+      project: projectId,
+      product: p.id,
+      cover: (p.images && p.images[0]) || null,
+      rows: wiz.rows,
+      lang: wiz.lang,
       status: '待审核',
       date: '今天',
       views: 0,
       likes: 0,
       leads: 0
     });
+    App.persist();
     wiz = newWiz();
     state.tab = 'queue';
+    state.projFilter = projectId;
     draw();
-    App.ui.toast('已进入合成队列（演示环境：正式版调用程序化剪辑引擎）', 'ok');
+    App.ui.toast(apiConfigured()
+      ? '已提交合成，完成后进入待审核'
+      : '已进入合成队列（未配置生成 API，当前为演示模式）', 'ok');
   }
 
-  /* ================= Tab 3：视频队列 ================= */
+  /* ================= Tab 3：视频仓库 ================= */
   function drawQueue(body) {
     var statusType = { '草稿': 'gray', '待审核': 'warn', '已发布': 'ok' };
-    var q = App.data.videoQueue;
+    var all = App.data.videoQueue;
+    var projects = App.data.videoProjects || [];
+
+    // 当前筛选下的视频（保留原数组索引，操作按 id 定位）
+    var q = state.projFilter === 'all' ? all
+      : all.filter(function (v) { return v.project === state.projFilter; });
+
+    var chips =
+      '<div class="row mb12" style="flex-wrap:wrap">' +
+      '<button class="btn btn-sm' + (state.projFilter === 'all' ? ' btn-primary' : '') + '" data-proj="all">全部（' + all.length + '）</button>' +
+      projects.map(function (pj) {
+        var n = all.filter(function (v) { return v.project === pj.id; }).length;
+        return '<button class="btn btn-sm' + (state.projFilter === pj.id ? ' btn-primary' : '') + '" data-proj="' + App.esc(pj.id) + '">' +
+          App.esc(pj.name) + '（' + n + '）</button>';
+      }).join('') +
+      '<button class="btn btn-sm btn-ghost" id="vf-proj-manage">管理项目</button>' +
+      '</div>';
 
     body.innerHTML =
       '<div class="card mb0">' +
-      '<div class="card-title">合成与发布队列 <span class="sub">共 ' + q.length + ' 条 · 审核通过后自动发布到视频号</span></div>' +
+      '<div class="card-title"><span>视频仓库 <span class="sub">生成的视频按项目管理 · 审核通过后自动发布到视频号</span></span>' +
+      '<button class="btn btn-sm" id="vf-api-cfg">⚙ 生成 API：' + (apiConfigured() ? '<span class="text-ok">已配置</span>' : '<span class="text-warn">演示模式</span>') + '</button>' +
+      '</div>' +
+      chips +
+      '<div style="overflow-x:auto">' +
       App.ui.table([
-        { key: 'title', label: '标题', render: function (r) { return '<b>' + App.esc(r.title) + '</b>'; } },
-        { key: 'template', label: '模板', render: function (r) { return '<span class="small muted">' + App.esc(r.template) + '</span>'; } },
+        {
+          key: 'title', label: '视频', render: function (r) {
+            var cover = r.cover
+              ? '<img src="' + r.cover + '" alt="" style="width:64px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0">'
+              : '<div style="width:64px;height:44px;border-radius:6px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;flex-shrink:0">🎬</div>';
+            return '<div class="row" style="align-items:center;min-width:240px">' + cover +
+              '<div><b>' + App.esc(r.title) + '</b>' +
+              '<div class="small muted">' + App.esc(r.template) + (r.product ? ' · ' + App.esc(r.product) : '') + '</div></div></div>';
+          }
+        },
+        {
+          key: 'project', label: '项目', render: function (r) {
+            var pj = findProject(r.project);
+            return pj ? App.ui.badge(pj.name, 'info') : '<span class="muted small">未分组</span>';
+          }
+        },
         { key: 'status', label: '状态', render: function (r) { return App.ui.badge(r.status, statusType[r.status] || 'gray'); } },
         { key: 'date', label: '日期' },
-        { key: 'views', label: '播放', render: function (r) { return App.fmt.num(r.views); } },
-        { key: 'likes', label: '点赞', render: function (r) { return App.fmt.num(r.likes); } },
-        { key: 'leads', label: '线索', render: function (r) { return r.leads > 0 ? '<b class="text-ok">' + r.leads + '</b>' : '0'; } },
         {
-          key: 'op', label: '操作', render: function (r, idx) {
-            if (r.status === '待审核') return '<button class="btn btn-sm btn-primary" data-act="approve" data-idx="' + idx + '">审核通过并发布</button>';
-            if (r.status === '草稿') return '<button class="btn btn-sm" data-act="edit" data-idx="' + idx + '">继续编辑</button>';
-            return '<span class="muted">-</span>';
+          key: 'stats', label: '数据', render: function (r) {
+            return '<span class="small">播放 ' + App.fmt.num(r.views) + ' · 赞 ' + App.fmt.num(r.likes) +
+              ' · 线索 ' + (r.leads > 0 ? '<b class="text-ok">' + r.leads + '</b>' : '0') + '</span>';
+          }
+        },
+        {
+          key: 'op', label: '操作', render: function (r) {
+            var h = '';
+            if (r.status === '待审核') h += '<button class="btn btn-sm btn-primary" data-act="approve" data-vid="' + App.esc(r.id) + '">审核发布</button> ';
+            if (r.status === '草稿') h += '<button class="btn btn-sm" data-act="edit" data-vid="' + App.esc(r.id) + '">继续编辑</button> ';
+            if (r.rows && r.rows.length) h += '<button class="btn btn-sm" data-act="script" data-vid="' + App.esc(r.id) + '">脚本</button> ';
+            h += '<button class="btn btn-sm btn-danger" data-act="delvid" data-vid="' + App.esc(r.id) + '">删除</button>';
+            return h;
           }
         }
-      ], q, { emptyMsg: '队列为空，去「AI 生成向导」产出第一条视频吧' }) +
-      '</div>';
+      ], q, { emptyMsg: state.projFilter === 'all' ? '仓库为空，去「AI 生成向导」产出第一条视频吧' : '该项目下暂无视频' }) +
+      '</div></div>';
+
+    body.querySelectorAll('button[data-proj]').forEach(function (b) {
+      b.onclick = function () { state.projFilter = b.getAttribute('data-proj'); drawBody(); };
+    });
+    var manageBtn = body.querySelector('#vf-proj-manage');
+    if (manageBtn) manageBtn.onclick = manageProjectsModal;
+    var apiBtn = body.querySelector('#vf-api-cfg');
+    if (apiBtn) apiBtn.onclick = apiConfigModal;
 
     body.querySelectorAll('button[data-act]').forEach(function (b) {
       b.onclick = function () {
-        var idx = parseInt(b.getAttribute('data-idx'), 10);
-        var item = App.data.videoQueue[idx];
+        var vid = b.getAttribute('data-vid');
+        var item = null;
+        for (var i = 0; i < all.length; i++) if (all[i].id === vid) item = all[i];
         if (!item) return;
-        if (b.getAttribute('data-act') === 'approve') {
+        var act = b.getAttribute('data-act');
+        if (act === 'approve') {
           item.status = '已发布';
+          App.persist();
           draw(); // 刷新 KPI 与列表
           App.ui.toast('已发布（演示环境：正式版对接视频号发布接口）', 'ok');
+        } else if (act === 'script') {
+          showVideoScriptModal(item);
+        } else if (act === 'delvid') {
+          deleteVideo(item);
         } else {
           App.ui.toast('演示环境：正式版将打开脚本编辑器继续编辑该草稿');
         }
       };
     });
+  }
+
+  /* ---- 查看已生成视频的分镜脚本 ---- */
+  function showVideoScriptModal(item) {
+    var tableHtml = '<div style="overflow-x:auto">' + App.ui.table([
+      { key: 'shot', label: '镜头', width: '80px', render: function (r) { return '<b>' + App.esc(r.shot) + '</b>'; } },
+      { key: 'visual', label: '画面', render: function (r) { return App.esc(r.visual); } },
+      { key: 'zh', label: '中文字幕', render: function (r) { return App.esc(r.zh) || '-'; } },
+      { key: 'en', label: '英文字幕', render: function (r) { return '<span class="small">' + App.esc(r.en) + '</span>'; } },
+      { key: 'vo', label: '配音', render: function (r) { return r.vo ? App.esc(r.vo) : '<span class="muted">-</span>'; } }
+    ], item.rows) + '</div>';
+    App.ui.modal(
+      item.title + ' · 分镜脚本',
+      '<div class="small muted mb8">' + App.esc(item.template) + (item.lang ? ' · 字幕语言：' + App.esc(item.lang) : '') + ' · ' + item.rows.length + ' 组分镜</div>' + tableHtml,
+      '<button class="btn" id="vf-script-close">关闭</button>',
+      { large: true }
+    );
+    document.getElementById('vf-script-close').onclick = App.ui.closeModal;
+  }
+
+  /* ---- 删除视频 ---- */
+  function deleteVideo(item) {
+    App.ui.modal('删除视频',
+      '<div class="notice">确定从仓库删除「' + App.esc(item.title) + '」吗？删除后无法找回。</div>',
+      '<button class="btn" id="vf-vd-cancel">取消</button>' +
+      '<button class="btn btn-danger" id="vf-vd-ok">删除</button>');
+    document.getElementById('vf-vd-cancel').onclick = App.ui.closeModal;
+    document.getElementById('vf-vd-ok').onclick = function () {
+      var i = App.data.videoQueue.indexOf(item);
+      if (i >= 0) App.data.videoQueue.splice(i, 1);
+      App.persist();
+      App.ui.closeModal();
+      draw();
+      App.ui.toast('已删除「' + item.title + '」');
+    };
+  }
+
+  /* ---- 项目管理弹窗：新建 / 重命名 / 删除 ---- */
+  function manageProjectsModal() {
+    var projects = App.data.videoProjects;
+
+    App.ui.modal('管理项目',
+      '<div class="small muted mb8">项目用于给生成的视频归类（例如：按投放计划、按产品、按月份）。</div>' +
+      '<div id="vf-pm-list"></div>' +
+      '<div class="row mt12">' +
+      '<input class="input" id="vf-pm-new" style="flex:1" placeholder="新项目名称，例如：8月 视频号日更">' +
+      '<button class="btn btn-primary" id="vf-pm-add">新建项目</button>' +
+      '</div>',
+      '<button class="btn" id="vf-pm-close">完成</button>');
+
+    function renderList() {
+      var box = document.getElementById('vf-pm-list');
+      box.innerHTML = projects.map(function (pj, i) {
+        var n = App.data.videoQueue.filter(function (v) { return v.project === pj.id; }).length;
+        return '<div class="row mb8" style="align-items:center">' +
+          '<input class="input" style="flex:1" data-pm-name="' + i + '" value="' + App.esc(pj.name) + '">' +
+          '<span class="small muted" style="width:64px;text-align:center">' + n + ' 条</span>' +
+          '<button class="btn btn-sm btn-danger" data-pm-del="' + i + '">删除</button>' +
+          '</div>';
+      }).join('') || '<div class="small muted">暂无项目</div>';
+
+      box.querySelectorAll('input[data-pm-name]').forEach(function (inp) {
+        inp.onchange = function () {
+          var pj = projects[parseInt(inp.getAttribute('data-pm-name'), 10)];
+          var v = inp.value.trim();
+          if (!v) { inp.value = pj.name; App.ui.toast('项目名称不能为空', 'bad'); return; }
+          pj.name = v;
+          App.persist();
+          App.ui.toast('已重命名为「' + v + '」', 'ok');
+        };
+      });
+      box.querySelectorAll('button[data-pm-del]').forEach(function (btn) {
+        btn.onclick = function () {
+          var pj = projects[parseInt(btn.getAttribute('data-pm-del'), 10)];
+          var n = App.data.videoQueue.filter(function (v) { return v.project === pj.id; }).length;
+          if (n > 0) { App.ui.toast('该项目下还有 ' + n + ' 条视频，请先删除或移走视频', 'bad'); return; }
+          projects.splice(projects.indexOf(pj), 1);
+          if (state.projFilter === pj.id) state.projFilter = 'all';
+          App.persist();
+          renderList();
+          App.ui.toast('已删除项目「' + pj.name + '」');
+        };
+      });
+    }
+    renderList();
+
+    document.getElementById('vf-pm-add').onclick = function () {
+      var inp = document.getElementById('vf-pm-new');
+      var v = inp.value.trim();
+      if (!v) { App.ui.toast('请输入项目名称', 'bad'); return; }
+      projects.push({ id: 'vp' + Date.now(), name: v });
+      inp.value = '';
+      App.persist();
+      renderList();
+      App.ui.toast('已新建项目「' + v + '」', 'ok');
+    };
+    document.getElementById('vf-pm-close').onclick = function () {
+      App.ui.closeModal();
+      drawBody(); // 项目名可能已变，刷新筛选行
+    };
+  }
+
+  /* ---- 生成 API 配置弹窗（占位，部署服务器后接真实视频生成服务） ---- */
+  function apiConfigModal() {
+    var cfg = getApiConfig() || { provider: '', url: '', key: '' };
+    App.ui.modal('视频生成 API 配置',
+      '<div class="notice mb12">真实的视频合成需要接入视频生成服务（部署到服务器后由技术配置）。' +
+      '未配置时系统以演示模式运行：提交合成只记录任务，不产生真实视频文件。</div>' +
+      '<div class="field"><label class="field-label">服务商</label>' +
+      '<select class="select" id="vf-api-provider">' +
+      ['自建剪辑服务', '可灵 AI', '海螺 AI', '即梦 AI', '其他'].map(function (s) {
+        return '<option value="' + s + '"' + (cfg.provider === s ? ' selected' : '') + '>' + s + '</option>';
+      }).join('') +
+      '</select></div>' +
+      '<div class="field"><label class="field-label">API 地址</label>' +
+      '<input class="input" id="vf-api-url" placeholder="https://…" value="' + App.esc(cfg.url) + '"></div>' +
+      '<div class="field"><label class="field-label">API 密钥</label>' +
+      '<input class="input" id="vf-api-key" type="password" placeholder="填入服务商提供的 Key" value="' + App.esc(cfg.key) + '"></div>' +
+      '<div class="small muted">密钥仅保存在本浏览器（正式版保存在服务器端，不下发给前端）。</div>',
+      '<button class="btn" id="vf-api-cancel">取消</button>' +
+      (apiConfigured() ? '<button class="btn btn-danger" id="vf-api-clear">清除配置</button>' : '') +
+      '<button class="btn btn-primary" id="vf-api-save">保存</button>');
+
+    document.getElementById('vf-api-cancel').onclick = App.ui.closeModal;
+    var clearBtn = document.getElementById('vf-api-clear');
+    if (clearBtn) clearBtn.onclick = function () {
+      try { localStorage.removeItem(API_STORE); } catch (e) {}
+      App.ui.closeModal();
+      drawBody();
+      App.ui.toast('已清除 API 配置，回到演示模式');
+    };
+    document.getElementById('vf-api-save').onclick = function () {
+      var url = document.getElementById('vf-api-url').value.trim();
+      if (!url) { App.ui.toast('请填写 API 地址', 'bad'); return; }
+      try {
+        localStorage.setItem(API_STORE, JSON.stringify({
+          provider: document.getElementById('vf-api-provider').value,
+          url: url,
+          key: document.getElementById('vf-api-key').value.trim()
+        }));
+      } catch (e) {}
+      App.ui.closeModal();
+      drawBody();
+      App.ui.toast('API 配置已保存，提交合成时将调用该服务', 'ok');
+    };
   }
 
   /* ---------- 注册模块 ---------- */
@@ -848,4 +1134,6 @@
     nav: { section: '流量端', label: '视频号视频工厂', icon: '🎬' },
     render: render
   });
+  // 启动即加载模板工作副本，保证其他模块（如广告投放的素材下拉）读到的是同一份数据
+  App.onDataReady(initTemplates);
 })();
