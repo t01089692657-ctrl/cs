@@ -502,6 +502,7 @@ window.AppData = {
 
   /* ---------- 主动客户开发 ---------- */
   icp: {
+    industry: 'modular homes / expandable container house',
     countries: ['美国', '加拿大', '澳大利亚', '新西兰', '德国', '法国', '北欧', '阿联酋', '沙特', '东南亚'],
     roles: ['Owner / Founder', 'Purchasing Manager', 'Project Manager', 'Director'],
     companyTypes: ['营地/度假村运营商', '建材经销商', '工程承包商', '民宿/短租连锁'],

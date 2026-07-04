@@ -49,15 +49,16 @@ window.App = (function () {
    * 产品库 / 视频仓库 / 视频项目的用户修改保存在本浏览器，刷新不丢。
    * 正式版部署服务器后替换为后端数据库，全公司共享。
    */
-  var PERSIST_KEYS = ['products', 'videoQueue', 'videoProjects'];
+  var PERSIST_KEYS = ['products', 'videoQueue', 'videoProjects', 'icp', 'prospects'];
   var PERSIST_STORE = 'app_data_v1';
 
   function loadPersisted() {
     var s = null;
     try { s = JSON.parse(localStorage.getItem(PERSIST_STORE) || 'null'); } catch (e) { s = null; }
     if (!s) return;
+    // 注意：空数组也是有效状态（如用户清空了视频仓库），只要存过该键就采用
     PERSIST_KEYS.forEach(function (k) {
-      if (s[k] && s[k].length) App.data[k] = s[k];
+      if (k in s && s[k] != null) App.data[k] = s[k];
     });
   }
 
