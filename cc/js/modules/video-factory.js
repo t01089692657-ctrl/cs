@@ -67,8 +67,21 @@
   }
 
   function newWiz() {
-    return { step: 1, templateId: null, productId: null, points: [], lang: '双语', rows: null, projectId: null, newProjName: '' };
+    return {
+      step: 1, templateId: null, productId: null, points: [], lang: '双语', rows: null,
+      projectId: null, newProjName: '',
+      ratio: '9:16', durationSec: 30, count: 1
+    };
   }
+
+  var RATIOS = [
+    { key: '9:16', label: '9:16 竖屏（视频号推荐）' },
+    { key: '16:9', label: '16:9 横屏' },
+    { key: '1:1', label: '1:1 方形' },
+    { key: '4:5', label: '4:5 竖屏' }
+  ];
+  var DURATIONS = [15, 30, 45, 60];
+  var BATCH_COUNTS = [1, 2, 3, 5, 10];
 
   function findProject(id) {
     var list = App.data.videoProjects || [];
@@ -634,6 +647,26 @@
       '<dt>分镜数</dt><dd>' + (wiz.rows ? wiz.rows.length + ' 组' : '-') + '</dd>' +
       '</dl>' +
       '</div>' +
+      '<div class="grid grid-3 mb12">' +
+      '<div class="field" style="margin-bottom:0"><label class="field-label">视频尺寸</label>' +
+      '<select class="select" id="vf-ratio">' +
+      RATIOS.map(function (r) {
+        return '<option value="' + r.key + '"' + (wiz.ratio === r.key ? ' selected' : '') + '>' + r.label + '</option>';
+      }).join('') +
+      '</select></div>' +
+      '<div class="field" style="margin-bottom:0"><label class="field-label">视频时长</label>' +
+      '<select class="select" id="vf-duration">' +
+      DURATIONS.map(function (s) {
+        return '<option value="' + s + '"' + (wiz.durationSec === s ? ' selected' : '') + '>' + s + ' 秒</option>';
+      }).join('') +
+      '</select></div>' +
+      '<div class="field" style="margin-bottom:0"><label class="field-label">批量生成条数（字幕/开头钩子自动做差异化）</label>' +
+      '<select class="select" id="vf-count">' +
+      BATCH_COUNTS.map(function (n) {
+        return '<option value="' + n + '"' + (wiz.count === n ? ' selected' : '') + '>' + n + ' 条' + (n > 1 ? '（批量）' : '') + '</option>';
+      }).join('') +
+      '</select></div>' +
+      '</div>' +
       '<div class="field" style="max-width:340px">' +
       '<label class="field-label">归属项目（在「视频仓库」中按项目管理）</label>' +
       '<select class="select" id="vf-proj">' +
@@ -721,6 +754,12 @@
     // 第④步
     var prev4 = body.querySelector('#vf-prev-4');
     if (prev4) prev4.onclick = function () { wiz.step = 3; drawBody(); };
+    var ratioSel = body.querySelector('#vf-ratio');
+    if (ratioSel) ratioSel.onchange = function () { wiz.ratio = ratioSel.value; };
+    var durSel = body.querySelector('#vf-duration');
+    if (durSel) durSel.onchange = function () { wiz.durationSec = parseInt(durSel.value, 10); };
+    var cntSel = body.querySelector('#vf-count');
+    if (cntSel) cntSel.onchange = function () { wiz.count = parseInt(cntSel.value, 10); };
     var projSel = body.querySelector('#vf-proj');
     if (projSel) projSel.onchange = function () {
       wiz.projectId = projSel.value;
@@ -861,29 +900,36 @@
       projectId = proj.id;
     }
 
-    App.data.videoQueue.unshift({
-      id: 'v' + Date.now(),
-      title: p.name + ' · ' + t.name,
-      template: t.name,
-      project: projectId,
-      product: p.id,
-      cover: (p.images && p.images[0]) || null,
-      rows: wiz.rows,
-      lang: wiz.lang,
-      status: '待审核',
-      date: '今天',
-      views: 0,
-      likes: 0,
-      leads: 0
-    });
+    var count = wiz.count || 1;
+    var base = p.name + ' · ' + t.name;
+    for (var i = count; i >= 1; i--) {   // 倒序 unshift，保证版本1在最上面
+      App.data.videoQueue.unshift({
+        id: 'v' + Date.now() + '-' + i,
+        title: base + (count > 1 ? ' · 版本' + i : ''),
+        template: t.name,
+        project: projectId,
+        product: p.id,
+        cover: (p.images && p.images[0]) || null,
+        rows: wiz.rows,
+        lang: wiz.lang,
+        ratio: wiz.ratio,
+        durationSec: wiz.durationSec,
+        variant: count > 1 ? i : null,
+        status: '待审核',
+        date: '今天',
+        views: 0,
+        likes: 0,
+        leads: 0
+      });
+    }
     App.persist();
     wiz = newWiz();
     state.tab = 'queue';
     state.projFilter = projectId;
     draw();
     App.ui.toast(apiConfigured()
-      ? '已提交合成，完成后进入待审核'
-      : '已进入合成队列（未配置生成 API，当前为演示模式）', 'ok');
+      ? '已提交合成 ' + count + ' 条，完成后进入待审核'
+      : '已进入合成队列 ' + count + ' 条（未配置生成 API，当前为演示模式）', 'ok');
   }
 
   /* ================= Tab 3：视频仓库 ================= */
@@ -922,7 +968,8 @@
               : '<div style="width:64px;height:44px;border-radius:6px;background:#f1f3f7;display:flex;align-items:center;justify-content:center;flex-shrink:0">🎬</div>';
             return '<div class="row" style="align-items:center;min-width:240px">' + cover +
               '<div><b>' + App.esc(r.title) + '</b>' +
-              '<div class="small muted">' + App.esc(r.template) + (r.product ? ' · ' + App.esc(r.product) : '') + '</div></div></div>';
+              '<div class="small muted">' + App.esc(r.template) + (r.product ? ' · ' + App.esc(r.product) : '') +
+              (r.ratio ? ' · ' + App.esc(r.ratio) : '') + (r.durationSec ? ' · ' + r.durationSec + 's' : '') + '</div></div></div>';
           }
         },
         {
@@ -941,7 +988,7 @@
         },
         {
           key: 'op', label: '操作', render: function (r) {
-            var h = '';
+            var h = '<button class="btn btn-sm" data-act="preview" data-vid="' + App.esc(r.id) + '">▶ 预览</button> ';
             if (r.status === '待审核') h += '<button class="btn btn-sm btn-primary" data-act="approve" data-vid="' + App.esc(r.id) + '">审核发布</button> ';
             if (r.status === '草稿') h += '<button class="btn btn-sm" data-act="edit" data-vid="' + App.esc(r.id) + '">继续编辑</button> ';
             if (r.rows && r.rows.length) h += '<button class="btn btn-sm" data-act="script" data-vid="' + App.esc(r.id) + '">脚本</button> ';
@@ -972,6 +1019,8 @@
           App.persist();
           draw(); // 刷新 KPI 与列表
           App.ui.toast('已发布（演示环境：正式版对接视频号发布接口）', 'ok');
+        } else if (act === 'preview') {
+          previewVideoModal(item);
         } else if (act === 'script') {
           showVideoScriptModal(item);
         } else if (act === 'delvid') {
@@ -981,6 +1030,120 @@
         }
       };
     });
+  }
+
+  /* ---- 预览视频：接入生成 API 前用「分镜脚本 + 产品图」模拟成片播放 ---- */
+  function previewVideoModal(item) {
+    var ratio = item.ratio || '9:16';
+    var dims = { '9:16': [304, 540], '16:9': [640, 360], '1:1': [460, 460], '4:5': [432, 540] }[ratio] || [304, 540];
+
+    // 封面：视频封面 > 产品首图
+    var cover = item.cover;
+    if (!cover) {
+      var p = findProduct(item.product);
+      if (p && p.images && p.images[0]) cover = p.images[0];
+    }
+
+    // 分镜：已保存脚本 > 同名模板的示例分镜
+    var rows = item.rows;
+    if (!rows || !rows.length) {
+      var tpl = null;
+      App.data.videoTemplates.forEach(function (t) { if (t.name === item.template) tpl = t; });
+      if (tpl && tpl.sample && tpl.sample.length) rows = tpl.sample;
+    }
+
+    // 已接生成 API 且有真实视频地址时直接播放成品
+    if (item.videoUrl && isDirectVideo(item.videoUrl)) {
+      App.ui.modal('预览 · ' + item.title,
+        '<video controls autoplay style="width:100%;max-height:62vh;background:#000;border-radius:8px;display:block" src="' + App.esc(item.videoUrl) + '"></video>',
+        '<button class="btn" id="vf-pv-close">关闭</button>', { large: true });
+      document.getElementById('vf-pv-close').onclick = App.ui.closeModal;
+      return;
+    }
+
+    var stageStyle = 'position:relative;width:' + dims[0] + 'px;height:' + dims[1] + 'px;max-width:100%;' +
+      'background:#0f172a;border-radius:12px;overflow:hidden;cursor:pointer;user-select:none;flex-shrink:0';
+    var coverHtml = cover
+      ? '<img src="' + cover + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">'
+      : '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:56px">🎬</div>';
+
+    if (!rows || !rows.length) {
+      App.ui.modal('预览 · ' + item.title,
+        '<div style="display:flex;justify-content:center"><div style="' + stageStyle + ';cursor:default">' + coverHtml + '</div></div>' +
+        '<div class="small muted mt8" style="text-align:center">该视频没有分镜脚本数据，暂以封面示意；接入生成 API 后此处播放成品视频。</div>',
+        '<button class="btn" id="vf-pv-close">关闭</button>', { large: true });
+      document.getElementById('vf-pv-close').onclick = App.ui.closeModal;
+      return;
+    }
+
+    var showZh = item.lang !== '英文';
+    var showEn = item.lang !== '中文';
+    // 每组分镜的模拟停留时长：按视频时长均分，限制在 1.5–3 秒之间保证演示节奏
+    var per = Math.min(3000, Math.max(1500, ((item.durationSec || 30) * 1000) / rows.length));
+
+    App.ui.modal('预览 · ' + item.title,
+      '<div style="display:flex;justify-content:center">' +
+      '<div id="vf-pv-stage" style="' + stageStyle + '">' +
+      coverHtml +
+      '<div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.45) 0%,rgba(0,0,0,0) 28%,rgba(0,0,0,0) 55%,rgba(0,0,0,.68) 100%)"></div>' +
+      '<div id="vf-pv-seg" style="position:absolute;top:8px;left:8px;right:8px;display:flex;gap:4px">' +
+      rows.map(function () {
+        return '<div style="flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.35)"><div class="vf-pv-fill" style="width:0%;height:100%;border-radius:2px;background:#fff"></div></div>';
+      }).join('') +
+      '</div>' +
+      '<div id="vf-pv-shot" style="position:absolute;top:20px;left:10px;background:rgba(0,0,0,.55);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px"></div>' +
+      '<div id="vf-pv-visual" style="position:absolute;top:44px;left:10px;right:10px;color:rgba(255,255,255,.85);font-size:11px;line-height:1.5"></div>' +
+      '<div style="position:absolute;left:10px;right:10px;bottom:12px;text-align:center">' +
+      (showZh ? '<div id="vf-pv-zh" style="color:#fff;font-size:14px;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.8);line-height:1.5"></div>' : '') +
+      (showEn ? '<div id="vf-pv-en" style="color:rgba(255,255,255,.92);font-size:12px;text-shadow:0 1px 3px rgba(0,0,0,.8);margin-top:3px;line-height:1.4"></div>' : '') +
+      '</div>' +
+      '<div id="vf-pv-pause" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:44px;color:rgba(255,255,255,.9);background:rgba(0,0,0,.25)">⏸</div>' +
+      '</div></div>' +
+      '<div class="small muted mt8" style="text-align:center">' + App.esc(ratio) + ' · ' + (item.durationSec || 30) + ' 秒 · ' + rows.length + ' 组分镜 · 点击画面暂停/继续<br>' +
+      '演示预览：以分镜脚本 + 产品图模拟成片效果；接入生成 API 后此处播放真实视频。</div>',
+      '<button class="btn" id="vf-pv-close">关闭</button>' +
+      (item.rows && item.rows.length ? '<button class="btn btn-primary" id="vf-pv-script">查看完整脚本</button>' : ''),
+      { large: true });
+
+    var stage = document.getElementById('vf-pv-stage');
+    var idx = 0, playing = true, elapsed = 0, tick = 60;
+
+    function renderFrame() {
+      var r = rows[idx];
+      document.getElementById('vf-pv-shot').textContent = r.shot || '镜头' + (idx + 1);
+      document.getElementById('vf-pv-visual').textContent = r.visual || '';
+      var zh = document.getElementById('vf-pv-zh');
+      if (zh) zh.textContent = r.zh || '';
+      var en = document.getElementById('vf-pv-en');
+      if (en) en.textContent = r.en || '';
+      var fills = stage.querySelectorAll('.vf-pv-fill');
+      for (var i = 0; i < fills.length; i++) {
+        fills[i].style.width = i < idx ? '100%' : (i === idx ? Math.round(elapsed / per * 100) + '%' : '0%');
+      }
+    }
+    renderFrame();
+
+    var timer = setInterval(function () {
+      if (!document.contains(stage)) { clearInterval(timer); return; } // 弹窗已关闭，自清理
+      if (!playing) return;
+      elapsed += tick;
+      if (elapsed >= per) {
+        elapsed = 0;
+        idx = (idx + 1) % rows.length;   // 循环播放
+      }
+      renderFrame();
+    }, tick);
+
+    stage.onclick = function () {
+      playing = !playing;
+      document.getElementById('vf-pv-pause').style.display = playing ? 'none' : 'flex';
+    };
+    document.getElementById('vf-pv-close').onclick = App.ui.closeModal;
+    var scriptBtn = document.getElementById('vf-pv-script');
+    if (scriptBtn) scriptBtn.onclick = function () {
+      App.ui.closeModal();
+      showVideoScriptModal(item);
+    };
   }
 
   /* ---- 查看已生成视频的分镜脚本 ---- */
