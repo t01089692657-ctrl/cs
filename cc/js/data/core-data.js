@@ -404,6 +404,27 @@ window.AppData = {
         { shot: '素材+大字', visual: '产品素材3段', zh: '固定总价 · 固定工期 · 到场即用', en: 'Fixed price. Fixed timeline. Move-in ready.', vo: '' },
         { shot: '落版', visual: 'LOGO+CTA', zh: '预算表私信免费领', en: 'Free budget sheet — DM us', vo: '' }
       ]
+    },
+    {
+      id: 'vt6', name: '敲镜头互动型', duration: '15-30秒', bestFor: '强互动钩子拉高完播率，适合冷启动涨粉/跑量投放',
+      structure: ['0-3s 钩子：指节敲击镜头"咚咚咚"打断刷屏', '3-10s 拉远揭晓：敲的是样板房窗户/墙板', '10-25s 敲击实测材料强度（墙板/玻璃/地板）', '25-30s 行动号召：私信领材料检测报告'],
+      sample: [
+        { shot: '特写', visual: '指节敲击镜头玻璃（实为样板房窗户内侧）', zh: '咚咚咚，别划走，看这里', en: 'Knock knock — stop scrolling', vo: '敲的不是你屏幕，是我们的窗户' },
+        { shot: '拉远', visual: '镜头拉远露出整栋样板房', zh: '刚才敲的，是这栋房子的窗户', en: 'That was the window of this house', vo: '双层中空玻璃，隔音又保温' },
+        { shot: '实测', visual: '锤敲墙板/成人原地跳地板', zh: '墙板随便敲，地板随便跳', en: 'Knock the walls, jump on the floor', vo: '镀锌钢骨架，抗风抗震' },
+        { shot: '落版', visual: 'LOGO+CTA', zh: '不信？私信「报告」看检测数据', en: 'DM "TEST" for lab reports', vo: '' }
+      ]
+    },
+    {
+      id: 'vt7', name: '工厂实力展示型', duration: '45-60秒', bestFor: '整厂参观视角建立信任，适合经销商/大单客户考察前种草',
+      structure: ['0-5s 钩子：无人机航拍厂区全景', '5-20s 车间巡览：钢构/焊接/总装一镜到底', '20-35s 成品库存区+装柜发货', '35-45s 资质证书+出口国家地图', '45s+ 行动号召：预约来厂考察/视频验厂'],
+      sample: [
+        { shot: '航拍', visual: '无人机掠过厂区全景', zh: '20000㎡的工厂，长这样', en: 'Our 20,000㎡ factory from above', vo: '自有工厂，不是贸易商' },
+        { shot: '跟拍', visual: '一镜穿过三大车间', zh: '钢构、焊接、总装，一条龙', en: 'Steel, welding, assembly — all in-house', vo: '月产能 300 套，大单不慌' },
+        { shot: '摇镜', visual: '成品库存区+集装箱装柜', zh: '现货常备 50 套，随时装柜', en: '50 units in stock, ready to ship', vo: '急单 7 天出货' },
+        { shot: '字幕卡', visual: 'CE/ISO 证书+全球发货地图', zh: '已出口 30+ 个国家', en: 'Exported to 30+ countries', vo: '' },
+        { shot: '落版', visual: 'LOGO+CTA', zh: '来厂考察或视频验厂，私信「预约」', en: 'DM "TOUR" — on-site or video factory tour', vo: '' }
+      ]
     }
   ],
 
