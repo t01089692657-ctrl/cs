@@ -413,25 +413,40 @@
     var channels = buildChannels(state.chKw, countryEn(state.chCountry));
 
     var acc = App.services.emailAccount.get();
+    var mode = App.services.engine.getMode();
+    var engineReady = App.services.engine.ready();
+    var modeChannels = App.services.channelsForMode(mode);
 
     body.innerHTML =
       '<div class="notice">两种用法：① 点「一键全渠道获客」让 AI 扫描全部渠道并汇总成表，勾选后一键发开发信；' +
       '② 用下方渠道卡片手动搜索（已按 <b>行业/产品 + 目标国家</b> 拼好搜索词），找到后回「潜客发现」录入。</div>' +
 
-      // 一键全渠道获客 + 发信邮箱
+      // 一键全渠道获客 + 引擎/邮箱
       '<div class="card">' +
       '<div class="row-between" style="flex-wrap:wrap;gap:10px">' +
       '<div>' +
       '<div class="bold">🚀 一键全渠道获客</div>' +
-      '<div class="small muted mt8">按当前 ICP（' + App.esc(state.chKw || '') + ' × ' + App.esc((icp.countries || []).join('/')) + '）扫描下方全部渠道，结果汇总成一张表，由你决定录入或群发开发信。</div>' +
+      '<div class="small muted mt8">按当前 ICP（' + App.esc(state.chKw || '') + ' × ' + App.esc((icp.countries || []).join('/')) + '）扫描 ' + modeChannels.length + ' 个渠道，结果汇总成一张表，由你决定录入或群发开发信。</div>' +
       '</div>' +
       '<div class="row" style="flex-wrap:wrap">' +
+      '<button class="btn" id="ch-engine-btn">⚙ 获客引擎：' + (engineReady ? '<span class="text-ok">已配置</span>' : '<span class="text-warn">演示模式</span>') + '</button>' +
       '<button class="btn" id="ch-email-btn">' + (acc && acc.email
         ? '📮 <span class="text-ok">' + App.esc(acc.email) + '</span> · 管理'
         : '📮 登录发信邮箱') + '</button>' +
       '<button class="btn btn-primary" id="ch-harvest"' + (harvesting ? ' disabled' : '') + '>🚀 一键全渠道获客</button>' +
       '</div>' +
       '</div>' +
+
+      // 数据来源模式切换（合规 / 全网）
+      '<div class="row mt12" style="align-items:center;flex-wrap:wrap;gap:8px">' +
+      '<span class="small muted">数据来源模式：</span>' +
+      '<button class="btn btn-sm' + (mode === 'compliant' ? ' btn-primary' : '') + '" data-mode="compliant">合规模式</button>' +
+      '<button class="btn btn-sm' + (mode === 'full' ? ' btn-primary' : '') + '" data-mode="full">全网模式</button>' +
+      '<span class="small muted">' + (mode === 'compliant'
+        ? '仅用合规数据源（Google/海关数据/B2B/展会 + 找邮箱 API），稳定合法'
+        : '<span class="text-warn">额外抓 LinkedIn/社媒，覆盖更广但违反平台条款、有封号与法律风险</span>') + '</span>' +
+      '</div>' +
+
       '<div id="ch-progress"></div>' +
       '<div id="ch-results">' + (harvest ? harvestTableHtml() : '') + '</div>' +
       '</div>' +
@@ -477,8 +492,88 @@
     body.querySelector('#ch-email-btn').onclick = function () {
       emailConfigModal(function () { renderChannels(body); });
     };
+    body.querySelector('#ch-engine-btn').onclick = function () {
+      engineConfigModal(function () { renderChannels(body); });
+    };
+    body.querySelectorAll('button[data-mode]').forEach(function (b) {
+      b.onclick = function () {
+        App.services.engine.setMode(b.getAttribute('data-mode'));
+        renderChannels(body);
+      };
+    });
     body.querySelector('#ch-harvest').onclick = function () { runHarvest(body); };
     if (harvest) bindHarvestEvents(body);
+  }
+
+  /* ---- 获客引擎配置（Crawl4AI 自建 + Firecrawl 兜底 + 找邮箱 + LLM） ---- */
+  function engineConfigModal(onSaved) {
+    var c = App.services.engine.get() || {
+      llmProvider: 'OpenAI', llmKey: '',
+      crawl4aiUrl: '', firecrawlKey: '',
+      emailFinder: 'Hunter.io', emailFinderKey: ''
+    };
+    App.ui.modal('获客引擎配置',
+      '<div class="notice mb12">这套「获客引擎」= 后端 AI agent：用 <b>LLM</b> 判断和写信，<b>Crawl4AI</b> 抓大批量页面、<b>Firecrawl</b> 兜底难抓的页面，<b>找邮箱 API</b> 补全负责人邮箱。' +
+      '当前为演示模式；填入下面的 key 并部署到服务器后（见《获客引擎-部署说明.md》），「一键全渠道获客」就会真实抓取。key 演示阶段仅存本浏览器，部署后只存服务器端。</div>' +
+
+      '<div class="field-label" style="font-weight:600">① 大模型（打分 + 写开发信）</div>' +
+      '<div class="row">' +
+      '<div class="field" style="width:180px"><label class="field-label">服务商</label>' +
+      '<select class="select" id="en-llm-provider">' +
+      ['OpenAI', 'Claude', 'DeepSeek', '通义千问', 'Gemini', '自定义'].map(function (p) {
+        return '<option' + (c.llmProvider === p ? ' selected' : '') + '>' + p + '</option>';
+      }).join('') +
+      '</select></div>' +
+      '<div class="field" style="flex:1"><label class="field-label">API Key</label>' +
+      '<input class="input" id="en-llm-key" type="password" placeholder="sk-…" value="' + App.esc(c.llmKey) + '"></div>' +
+      '</div>' +
+
+      '<div class="field-label mt8" style="font-weight:600">② 抓取引擎（两者结合）</div>' +
+      '<div class="field"><label class="field-label">Crawl4AI 服务地址（自建，跑大批量）</label>' +
+      '<input class="input" id="en-crawl4ai" placeholder="https://你的服务器:11235" value="' + App.esc(c.crawl4aiUrl) + '"></div>' +
+      '<div class="field"><label class="field-label">Firecrawl API Key（兜底难抓/反爬页面）</label>' +
+      '<input class="input" id="en-firecrawl" type="password" placeholder="fc-…" value="' + App.esc(c.firecrawlKey) + '"></div>' +
+
+      '<div class="field-label mt8" style="font-weight:600">③ 找邮箱</div>' +
+      '<div class="row">' +
+      '<div class="field" style="width:180px"><label class="field-label">服务商</label>' +
+      '<select class="select" id="en-mail-finder">' +
+      ['Hunter.io', 'Apollo.io', 'Snov.io', '自定义'].map(function (p) {
+        return '<option' + (c.emailFinder === p ? ' selected' : '') + '>' + p + '</option>';
+      }).join('') +
+      '</select></div>' +
+      '<div class="field" style="flex:1"><label class="field-label">API Key</label>' +
+      '<input class="input" id="en-mail-key" type="password" placeholder="找邮箱服务的 key" value="' + App.esc(c.emailFinderKey) + '"></div>' +
+      '</div>',
+      '<button class="btn" id="en-cancel">取消</button>' +
+      (App.services.engine.get() ? '<button class="btn btn-danger" id="en-clear">清除配置</button>' : '') +
+      '<button class="btn btn-primary" id="en-save">保存</button>',
+      { large: true });
+
+    document.getElementById('en-cancel').onclick = App.ui.closeModal;
+    var clearBtn = document.getElementById('en-clear');
+    if (clearBtn) clearBtn.onclick = function () {
+      App.services.engine.clear();
+      App.ui.closeModal();
+      App.ui.toast('已清除引擎配置，回到演示模式');
+      if (onSaved) onSaved();
+    };
+    document.getElementById('en-save').onclick = function () {
+      var cfg = {
+        llmProvider: document.getElementById('en-llm-provider').value,
+        llmKey: document.getElementById('en-llm-key').value.trim(),
+        crawl4aiUrl: document.getElementById('en-crawl4ai').value.trim(),
+        firecrawlKey: document.getElementById('en-firecrawl').value.trim(),
+        emailFinder: document.getElementById('en-mail-finder').value,
+        emailFinderKey: document.getElementById('en-mail-key').value.trim()
+      };
+      App.services.engine.save(cfg);
+      App.ui.closeModal();
+      App.ui.toast(App.services.engine.ready()
+        ? '引擎配置已保存，部署到服务器后即可真实抓取'
+        : '已保存，但还差 LLM Key 或抓取引擎，暂仍为演示模式', App.services.engine.ready() ? 'ok' : 'bad');
+      if (onSaved) onSaved();
+    };
   }
 
   /* ---- 一键全渠道获客：逐渠道扫描动画 → 服务层取结果 → 汇总表 ---- */
@@ -488,9 +583,10 @@
     var btn = body.querySelector('#ch-harvest');
     if (btn) btn.disabled = true;
     var box = body.querySelector('#ch-progress');
-    var channels = ['Google 搜索', 'Google 地图', 'LinkedIn', 'X（推特）', 'YouTube', 'Facebook', '海关数据', 'B2B 目录', '行业展会'];
+    var mode = App.services.engine.getMode();
+    var channels = App.services.channelsForMode(mode);
     box.innerHTML = '<div class="ai-box mt12"><div class="row mb8" style="gap:8px"><span class="ai-tag">AI</span>' +
-      '<span class="small bold">正在按 ICP 扫描全部获客渠道…</span></div>' +
+      '<span class="small bold">正在按 ICP 扫描获客渠道（' + (mode === 'full' ? '全网模式' : '合规模式') + '）…</span></div>' +
       '<div id="ch-prog-list" class="small" style="line-height:2"></div></div>';
     var listEl = box.querySelector('#ch-prog-list');
 
@@ -510,7 +606,8 @@
       // 全部渠道扫完 → 服务层取汇总结果（正式版为后端真实抓取）
       App.services.discoverProspects({
         keyword: state.chKw,
-        countries: App.data.icp.countries
+        countries: App.data.icp.countries,
+        mode: mode
       }).then(function (results) {
         harvesting = false;
         harvest = results;
