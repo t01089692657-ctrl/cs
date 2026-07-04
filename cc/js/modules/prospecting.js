@@ -9,8 +9,11 @@
 
   /* ---------- 模块私有状态 ---------- */
   var state = { tab: 'icp', chKw: null, chCountry: null };
-  var converted = {};   // prospectId -> true：该回复已转入线索池
-  var leadSeq = 100;    // 生成线索 id 的自增序号
+  var converted = {};    // prospectId -> true：该回复已转入线索池
+  var leadSeq = 100;     // 生成线索 id 的自增序号
+  var harvest = null;    // 一键全渠道获客的结果（本次会话内保留）
+  var harvestSel = {};   // 结果表勾选状态 index -> true
+  var harvesting = false;
 
   var TABS = [
     { id: 'icp', label: '目标画像 ICP' },
@@ -409,10 +412,29 @@
 
     var channels = buildChannels(state.chKw, countryEn(state.chCountry));
 
+    var acc = App.services.emailAccount.get();
+
     body.innerHTML =
-      '<div class="notice">下面每个渠道都按你的 <b>行业/产品 + 目标国家</b> 拼好了搜索词，点按钮直接打开对应平台搜索。' +
-      '流程：渠道里找到公司 → 打开官网 / 用找邮箱工具拿到负责人邮箱 → 回「潜客发现」手动录入 → 加入触达序列自动发开发信。' +
-      '正式版部署后可对接 API 自动抓取和发送。</div>' +
+      '<div class="notice">两种用法：① 点「一键全渠道获客」让 AI 扫描全部渠道并汇总成表，勾选后一键发开发信；' +
+      '② 用下方渠道卡片手动搜索（已按 <b>行业/产品 + 目标国家</b> 拼好搜索词），找到后回「潜客发现」录入。</div>' +
+
+      // 一键全渠道获客 + 发信邮箱
+      '<div class="card">' +
+      '<div class="row-between" style="flex-wrap:wrap;gap:10px">' +
+      '<div>' +
+      '<div class="bold">🚀 一键全渠道获客</div>' +
+      '<div class="small muted mt8">按当前 ICP（' + App.esc(state.chKw || '') + ' × ' + App.esc((icp.countries || []).join('/')) + '）扫描下方全部渠道，结果汇总成一张表，由你决定录入或群发开发信。</div>' +
+      '</div>' +
+      '<div class="row" style="flex-wrap:wrap">' +
+      '<button class="btn" id="ch-email-btn">' + (acc && acc.email
+        ? '📮 <span class="text-ok">' + App.esc(acc.email) + '</span> · 管理'
+        : '📮 登录发信邮箱') + '</button>' +
+      '<button class="btn btn-primary" id="ch-harvest"' + (harvesting ? ' disabled' : '') + '>🚀 一键全渠道获客</button>' +
+      '</div>' +
+      '</div>' +
+      '<div id="ch-progress"></div>' +
+      '<div id="ch-results">' + (harvest ? harvestTableHtml() : '') + '</div>' +
+      '</div>' +
 
       '<div class="card">' +
       '<div class="row" style="flex-wrap:wrap">' +
@@ -451,6 +473,282 @@
     body.querySelector('#ch-country').onchange = function () {
       state.chCountry = this.value;
       renderChannels(body);
+    };
+    body.querySelector('#ch-email-btn').onclick = function () {
+      emailConfigModal(function () { renderChannels(body); });
+    };
+    body.querySelector('#ch-harvest').onclick = function () { runHarvest(body); };
+    if (harvest) bindHarvestEvents(body);
+  }
+
+  /* ---- 一键全渠道获客：逐渠道扫描动画 → 服务层取结果 → 汇总表 ---- */
+  function runHarvest(body) {
+    if (harvesting) return;
+    harvesting = true;
+    var btn = body.querySelector('#ch-harvest');
+    if (btn) btn.disabled = true;
+    var box = body.querySelector('#ch-progress');
+    var channels = ['Google 搜索', 'Google 地图', 'LinkedIn', 'X（推特）', 'YouTube', 'Facebook', '海关数据', 'B2B 目录', '行业展会'];
+    box.innerHTML = '<div class="ai-box mt12"><div class="row mb8" style="gap:8px"><span class="ai-tag">AI</span>' +
+      '<span class="small bold">正在按 ICP 扫描全部获客渠道…</span></div>' +
+      '<div id="ch-prog-list" class="small" style="line-height:2"></div></div>';
+    var listEl = box.querySelector('#ch-prog-list');
+
+    var i = 0;
+    var lines = [];
+    function step() {
+      if (!document.contains(listEl)) { harvesting = false; return; } // 已切走页面
+      if (i < channels.length) {
+        var found = 1 + Math.floor(Math.random() * 2);
+        lines.push('✓ ' + channels[i] + '：发现 ' + found + ' 家匹配公司');
+        listEl.innerHTML = lines.map(function (l) { return '<div>' + App.esc(l) + '</div>'; }).join('') +
+          (i < channels.length - 1 ? '<div class="muted">⏳ 正在扫描 ' + App.esc(channels[i + 1]) + '…</div>' : '');
+        i++;
+        setTimeout(step, 420);
+        return;
+      }
+      // 全部渠道扫完 → 服务层取汇总结果（正式版为后端真实抓取）
+      App.services.discoverProspects({
+        keyword: state.chKw,
+        countries: App.data.icp.countries
+      }).then(function (results) {
+        harvesting = false;
+        harvest = results;
+        harvestSel = {};
+        results.forEach(function (r, idx) { if (r.email) harvestSel[idx] = true; }); // 默认勾选有邮箱的
+        if (!document.contains(box)) return;
+        box.innerHTML = '';
+        var resBox = body.querySelector('#ch-results');
+        resBox.innerHTML = harvestTableHtml();
+        bindHarvestEvents(body);
+        var b2 = body.querySelector('#ch-harvest');
+        if (b2) b2.disabled = false;
+        App.ui.toast('全渠道扫描完成，共发现 ' + results.length + ' 家潜在客户', 'ok');
+      });
+    }
+    step();
+  }
+
+  function harvestTableHtml() {
+    var selCount = 0, selMail = 0;
+    harvest.forEach(function (r, i) {
+      if (harvestSel[i]) { selCount++; if (r.email) selMail++; }
+    });
+    return '<div class="row-between mt12 mb8" style="flex-wrap:wrap;gap:8px">' +
+      '<span class="bold">全渠道获客结果 <span class="small muted">共 ' + harvest.length + ' 家 · 已选 ' + selCount + ' · 选中含邮箱 ' + selMail + '</span></span>' +
+      '<span class="row" style="flex-wrap:wrap">' +
+      '<button class="btn btn-sm" id="ch-sel-all">全选 / 清空</button>' +
+      '<button class="btn btn-sm" id="ch-import">📥 录入选中潜客</button>' +
+      '<button class="btn btn-sm btn-primary" id="ch-send">✉️ 一键发送开发信（' + selMail + '）</button>' +
+      '</span></div>' +
+      '<div style="overflow-x:auto"><table class="tbl"><thead><tr>' +
+      '<th style="width:34px"></th><th>公司</th><th>渠道</th><th>国家</th><th>联系人</th><th>邮箱</th><th style="width:70px">AI 评分</th><th>状态</th>' +
+      '</tr></thead><tbody>' +
+      harvest.map(function (r, i) {
+        var status = r.sent ? App.ui.badge('已发开发信', 'ok')
+          : r.added ? App.ui.badge('已录入', 'accent')
+            : '<span class="muted small">-</span>';
+        return '<tr>' +
+          '<td><input type="checkbox" data-hi="' + i + '"' + (harvestSel[i] ? ' checked' : '') + (r.sent ? ' disabled' : '') + ' style="accent-color:var(--accent)"></td>' +
+          '<td><b>' + App.esc(r.company) + '</b><div class="small muted">' + App.esc(r.website) + '</div></td>' +
+          '<td>' + App.ui.badge(r.channel, 'info') + '</td>' +
+          '<td>' + App.esc(r.country) + '</td>' +
+          '<td>' + App.esc(r.person) + '<div class="small muted">' + App.esc(r.role) + '</div></td>' +
+          '<td>' + (r.email ? '<span class="small">' + App.esc(r.email) + '</span>'
+            : '<span class="small text-warn">待补（用 Hunter 查）</span>') + '</td>' +
+          '<td><b class="text-' + scoreCls(r.score) + '">' + r.score + '</b></td>' +
+          '<td>' + status + '</td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table></div>' +
+      '<div class="small muted mt8">演示数据由 AI 模拟生成；部署服务器接入抓取 API 后，这里就是真实公司。勾选后可先「录入」再逐个跟进，或直接「一键发送开发信」（用触达序列 D0 话术，自动替换公司/人名）。</div>';
+  }
+
+  function bindHarvestEvents(body) {
+    var resBox = body.querySelector('#ch-results');
+    if (!resBox || !harvest) return;
+
+    function refresh() {
+      resBox.innerHTML = harvestTableHtml();
+      bindHarvestEvents(body);
+    }
+
+    resBox.querySelectorAll('input[data-hi]').forEach(function (cb) {
+      cb.onchange = function () {
+        harvestSel[parseInt(cb.getAttribute('data-hi'), 10)] = cb.checked;
+        refresh();
+      };
+    });
+
+    var selAll = resBox.querySelector('#ch-sel-all');
+    if (selAll) selAll.onclick = function () {
+      var any = Object.keys(harvestSel).some(function (k) { return harvestSel[k]; });
+      harvestSel = {};
+      if (!any) harvest.forEach(function (r, i) { if (!r.sent) harvestSel[i] = true; });
+      refresh();
+    };
+
+    // 录入选中 → 潜客名单
+    var importBtn = resBox.querySelector('#ch-import');
+    if (importBtn) importBtn.onclick = function () {
+      var items = harvest.filter(function (r, i) { return harvestSel[i] && !r.added; });
+      if (!items.length) { App.ui.toast('请先勾选要录入的公司（未录入过的）'); return; }
+      items.forEach(function (r) { addHarvestProspect(r, '待触达', '-'); });
+      App.persist();
+      refresh();
+      App.ui.toast('已录入 ' + items.length + ' 家到「潜客发现」', 'ok');
+    };
+
+    // 一键发送开发信
+    var sendBtn = resBox.querySelector('#ch-send');
+    if (sendBtn) sendBtn.onclick = function () {
+      var items = harvest.filter(function (r, i) { return harvestSel[i] && r.email && !r.sent; });
+      if (!items.length) { App.ui.toast('选中的公司里没有可发送的邮箱（已发过的不重复发）', 'bad'); return; }
+      var acc = App.services.emailAccount.get();
+      if (!acc || !acc.email) {
+        App.ui.toast('请先登录发信邮箱', 'bad');
+        emailConfigModal(function () { renderChannels(body); });
+        return;
+      }
+      sendOutreachModal(items, acc, body);
+    };
+  }
+
+  function addHarvestProspect(r, status, lastAction) {
+    App.data.prospects.unshift({
+      id: 'ph' + Date.now() + '-' + Math.floor(Math.random() * 10000),
+      company: r.company, country: r.country, person: r.person, role: r.role,
+      website: r.website, email: r.email, source: r.channel,
+      score: r.score, signals: r.signals,
+      status: status, lastAction: lastAction
+    });
+    r.added = true;
+  }
+
+  /* ---- 一键发送开发信：确认弹窗 → 服务层发送 ---- */
+  function sendOutreachModal(items, acc, body) {
+    var d0 = App.data.outreachSequences[0];
+    var names = items.slice(0, 5).map(function (r) { return r.company; }).join('、') +
+      (items.length > 5 ? ' 等 ' + items.length + ' 家' : '');
+
+    App.ui.modal('一键发送开发信',
+      '<dl class="kv">' +
+      '<dt>发件邮箱</dt><dd><b>' + App.esc(acc.email) + '</b>（' + App.esc(acc.name || '未设发件人名') + '）</dd>' +
+      '<dt>收件对象</dt><dd>' + App.esc(names) + '，共 <b>' + items.length + '</b> 封</dd>' +
+      '<dt>使用话术</dt><dd>触达序列 D0（可在「触达序列」页签修改）</dd>' +
+      '</dl>' +
+      '<div class="field-label mt12">邮件预览（发送时 {name}/{company}/{country} 自动替换为每家的真实信息）</div>' +
+      '<div class="ai-box"><div class="bold mb8">' + hl(d0.subject) + '</div>' +
+      '<div class="small" style="white-space:pre-wrap;line-height:1.7">' + hl(d0.body) + '</div></div>' +
+      '<div class="notice mt12">发送后这些公司自动录入「潜客发现」并进入触达序列（D3/D7/D14 自动跟进，对方回复即停）。' +
+      '当前为演示模式，不会真实发出；部署后由服务器通过你的邮箱 SMTP 真实发送。</div>' +
+      '<div id="send-progress"></div>',
+      '<button class="btn" id="send-cancel">取消</button>' +
+      '<button class="btn btn-primary" id="send-ok">确认发送 ' + items.length + ' 封</button>');
+
+    document.getElementById('send-cancel').onclick = App.ui.closeModal;
+    document.getElementById('send-ok').onclick = function () {
+      var okBtn = this;
+      okBtn.disabled = true;
+      var box = document.getElementById('send-progress');
+      var stop = App.ai.thinking(box, '正在通过 ' + acc.email + ' 逐封发送（自动替换个性化字段）…');
+      App.services.sendOutreach(acc, items, d0).then(function (res) {
+        stop();
+        items.forEach(function (r) {
+          if (r.added) {
+            // 已录入过的直接更新状态
+            for (var i = 0; i < App.data.prospects.length; i++) {
+              var p = App.data.prospects[i];
+              if (p.company === r.company && p.website === r.website) {
+                p.status = '已发邮件';
+                p.lastAction = 'D0 开发信已发送（批量）';
+                break;
+              }
+            }
+          } else {
+            addHarvestProspect(r, '已发邮件', 'D0 开发信已发送（批量）');
+          }
+          r.sent = true;
+        });
+        App.persist();
+        App.ui.closeModal();
+        var bodyEl = document.getElementById('pros-body');
+        if (bodyEl && state.tab === 'channels') renderChannels(bodyEl);
+        App.ui.toast('已发送 ' + res.sent + ' 封开发信（演示模式），对应公司已进入触达序列', 'ok');
+      });
+    };
+  }
+
+  /* ---- 发信邮箱：登录 / 编辑 / 退出 ---- */
+  var SMTP_PRESETS = {
+    'Gmail': { host: 'smtp.gmail.com', port: 465 },
+    'Outlook': { host: 'smtp.office365.com', port: 587 },
+    'QQ 邮箱': { host: 'smtp.qq.com', port: 465 },
+    '163 邮箱': { host: 'smtp.163.com', port: 465 },
+    '阿里企业邮': { host: 'smtp.qiye.aliyun.com', port: 465 },
+    '腾讯企业邮': { host: 'smtp.exmail.qq.com', port: 465 },
+    '自定义 SMTP': { host: '', port: 465 }
+  };
+
+  function emailConfigModal(onSaved) {
+    var acc = App.services.emailAccount.get() || { name: '', email: '', provider: 'Gmail', host: SMTP_PRESETS['Gmail'].host, port: SMTP_PRESETS['Gmail'].port, auth: '' };
+
+    App.ui.modal('登录发信邮箱',
+      '<div class="notice mb12">开发信将通过这个邮箱发出。企业邮箱送达率最好；Gmail/QQ 等需要在邮箱设置里开启 SMTP 并生成「授权码」。' +
+      '当前为演示模式，配置仅保存在本浏览器；部署后密码只保存在服务器端。</div>' +
+      '<div class="row">' +
+      '<div class="field" style="flex:1"><label class="field-label">发件人名称</label>' +
+      '<input class="input" id="em-name" placeholder="例如：Kevin - Oasis Modular" value="' + App.esc(acc.name) + '"></div>' +
+      '<div class="field" style="flex:1"><label class="field-label">邮箱地址 *</label>' +
+      '<input class="input" id="em-email" placeholder="例如：kevin@oasismodular.com" value="' + App.esc(acc.email) + '"></div>' +
+      '</div>' +
+      '<div class="row">' +
+      '<div class="field" style="flex:1"><label class="field-label">服务商</label>' +
+      '<select class="select" id="em-provider">' +
+      Object.keys(SMTP_PRESETS).map(function (p) {
+        return '<option' + (acc.provider === p ? ' selected' : '') + '>' + p + '</option>';
+      }).join('') +
+      '</select></div>' +
+      '<div class="field" style="flex:2"><label class="field-label">SMTP 服务器</label>' +
+      '<input class="input" id="em-host" value="' + App.esc(acc.host) + '"></div>' +
+      '<div class="field" style="width:90px"><label class="field-label">端口</label>' +
+      '<input class="input" id="em-port" type="number" value="' + App.esc(acc.port) + '"></div>' +
+      '</div>' +
+      '<div class="field"><label class="field-label">密码 / 授权码</label>' +
+      '<input class="input" id="em-auth" type="password" placeholder="邮箱 SMTP 授权码" value="' + App.esc(acc.auth) + '"></div>',
+      '<button class="btn" id="em-cancel">取消</button>' +
+      (App.services.emailAccount.get() ? '<button class="btn btn-danger" id="em-logout">退出登录</button>' : '') +
+      '<button class="btn btn-primary" id="em-save">保存并登录</button>');
+
+    document.getElementById('em-provider').onchange = function () {
+      var p = SMTP_PRESETS[this.value];
+      if (p) {
+        document.getElementById('em-host').value = p.host;
+        document.getElementById('em-port').value = p.port;
+      }
+    };
+    document.getElementById('em-cancel').onclick = App.ui.closeModal;
+    var logoutBtn = document.getElementById('em-logout');
+    if (logoutBtn) logoutBtn.onclick = function () {
+      App.services.emailAccount.clear();
+      App.ui.closeModal();
+      App.ui.toast('已退出发信邮箱');
+      if (onSaved) onSaved();
+    };
+    document.getElementById('em-save').onclick = function () {
+      var email = document.getElementById('em-email').value.trim();
+      if (!/^\S+@\S+\.\S+$/.test(email)) { App.ui.toast('请填写正确的邮箱地址', 'bad'); return; }
+      var ok = App.services.emailAccount.save({
+        name: document.getElementById('em-name').value.trim(),
+        email: email,
+        provider: document.getElementById('em-provider').value,
+        host: document.getElementById('em-host').value.trim(),
+        port: parseInt(document.getElementById('em-port').value, 10) || 465,
+        auth: document.getElementById('em-auth').value
+      });
+      App.ui.closeModal();
+      App.ui.toast(ok ? '已登录发信邮箱 ' + email : '保存失败：浏览器存储不可用', ok ? 'ok' : 'bad');
+      if (onSaved) onSaved();
     };
   }
 
