@@ -22,6 +22,38 @@
   var wiz = newWiz();
   var rootEl = null;
 
+  /* ---------- 模板持久化（浏览器 localStorage，原型阶段） ----------
+   * 用户对模板的编辑/新增/删除保存在本浏览器，刷新不丢；
+   * 「恢复出厂模板」可随时回到 core-data.js 里的内置模板。
+   */
+  var TPL_KEY = 'vf_templates_v1';
+  var tplInited = false;
+  var factoryTpls = null;   // 内置模板快照（深拷贝，用于恢复出厂）
+  var deletedIds = [];      // 用户删除过的内置模板 id（防止刷新后复活）
+
+  function initTemplates() {
+    if (tplInited) return;
+    tplInited = true;
+    factoryTpls = JSON.parse(JSON.stringify(App.data.videoTemplates));
+    var stored = null;
+    try { stored = JSON.parse(localStorage.getItem(TPL_KEY) || 'null'); } catch (e) { stored = null; }
+    if (!stored || !stored.templates || !stored.templates.length) return;
+    deletedIds = stored.deleted || [];
+    var have = {};
+    stored.templates.forEach(function (t) { have[t.id] = true; });
+    // 内置模板后续有新增时，自动补进用户的工作副本
+    factoryTpls.forEach(function (t) {
+      if (!have[t.id] && deletedIds.indexOf(t.id) < 0) stored.templates.push(JSON.parse(JSON.stringify(t)));
+    });
+    App.data.videoTemplates = stored.templates;
+  }
+
+  function saveTemplates() {
+    try {
+      localStorage.setItem(TPL_KEY, JSON.stringify({ templates: App.data.videoTemplates, deleted: deletedIds }));
+    } catch (e) { /* 隐私模式等存储不可用时，修改仅本次会话内有效 */ }
+  }
+
   function newWiz() {
     return { step: 1, templateId: null, productId: null, points: [], lang: '双语', rows: null };
   }
@@ -40,6 +72,7 @@
   /* ---------- 入口 ---------- */
   function render(el) {
     rootEl = el;
+    initTemplates();
     draw();
   }
 
@@ -68,6 +101,19 @@
       '.mod-video-factory .vf-ta{width:100%;min-height:54px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;padding:6px 8px;font-family:inherit;resize:vertical;line-height:1.5;color:var(--ink)}' +
       '.mod-video-factory .vf-ta:focus{border-color:var(--accent);outline:none}' +
       '.mod-video-factory .vf-sb td{vertical-align:top}' +
+      '.mod-video-factory .vf-videos{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}' +
+      '.mod-video-factory .vf-vid-btn{border-color:var(--ok);color:var(--ok);background:var(--ok-soft)}' +
+      '.mod-video-factory .vf-vid-btn:hover{background:var(--ok);color:#fff}' +
+      /* 模板编辑弹窗（渲染在 modal-root，样式全局生效，用 .vf-form 前缀隔离） */
+      '.vf-form .vf-f-grid{display:grid;grid-template-columns:1fr 140px;gap:10px}' +
+      '.vf-form .vf-f-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}' +
+      '.vf-form .vf-f-row .input{margin:0}' +
+      '.vf-form .vf-f-del{flex-shrink:0;border:1px solid var(--line);background:#fff;border-radius:6px;width:26px;height:26px;line-height:1;cursor:pointer;color:var(--muted);font-size:14px}' +
+      '.vf-form .vf-f-del:hover{border-color:var(--bad);color:var(--bad)}' +
+      '.vf-form .vf-f-shot{border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;background:#f8fafc}' +
+      '.vf-form .vf-f-shot .vf-f-row:last-child{margin-bottom:0}' +
+      '.vf-form .vf-f-sec{font-size:13px;font-weight:600;margin:14px 0 6px}' +
+      '.vf-form .vf-f-sec:first-child{margin-top:0}' +
       '</style>' +
       '<div class="mod-video-factory">' +
 
@@ -116,31 +162,279 @@
   function drawTemplates(body) {
     var tpls = App.data.videoTemplates;
     body.innerHTML =
+      '<div class="row-between mb12">' +
+      '<span class="small muted">共 ' + tpls.length + ' 个模板 · 名称/分镜/案例视频均可自行修改，保存在本浏览器</span>' +
+      '<div class="row">' +
+      '<button class="btn btn-sm" id="vf-tpl-reset">恢复出厂模板</button>' +
+      '<button class="btn btn-sm btn-primary" id="vf-tpl-add">＋ 新建模板</button>' +
+      '</div>' +
+      '</div>' +
       '<div class="grid grid-2">' +
       tpls.map(function (t) {
+        var vids = t.videos || [];
         return '<div class="card mb0 vf-tpl">' +
-          '<div class="card-title">' + App.esc(t.name) + App.ui.badge(t.duration, 'accent') + '</div>' +
+          '<div class="card-title">' + App.esc(t.name) + App.ui.badge(t.duration, 'accent') +
+          (t.custom ? ' ' + App.ui.badge('自定义', 'purple') : '') + '</div>' +
           '<div class="small muted">适用：' + App.esc(t.bestFor) + '</div>' +
           '<div class="vf-struct">' +
           t.structure.map(function (s, i) {
             return '<div>' + (i + 1) + '. ' + App.esc(s) + '</div>';
           }).join('') +
           '</div>' +
+          '<div class="vf-videos">' +
+          (vids.length
+            ? vids.map(function (v, vi) {
+                return '<button class="btn btn-sm vf-vid-btn" data-act="video" data-id="' + App.esc(t.id) + '" data-vi="' + vi + '">▶ ' +
+                  App.esc(v.title || '案例视频 ' + (vi + 1)) + '</button>';
+              }).join('')
+            : '<button class="btn btn-sm btn-ghost" data-act="edit" data-id="' + App.esc(t.id) + '">＋ 添加案例视频</button>') +
+          '</div>' +
           '<div class="row">' +
           '<button class="btn btn-sm" data-act="sample" data-id="' + App.esc(t.id) + '">查看示例分镜</button>' +
           '<button class="btn btn-sm btn-primary" data-act="use" data-id="' + App.esc(t.id) + '">用此模板生成</button>' +
+          '<span style="flex:1"></span>' +
+          '<button class="btn btn-sm" data-act="edit" data-id="' + App.esc(t.id) + '">编辑</button>' +
+          '<button class="btn btn-sm btn-danger" data-act="del" data-id="' + App.esc(t.id) + '">删除</button>' +
           '</div>' +
           '</div>';
       }).join('') +
       '</div>';
 
+    var addBtn = body.querySelector('#vf-tpl-add');
+    if (addBtn) addBtn.onclick = function () { editTemplateModal(null); };
+    var resetBtn = body.querySelector('#vf-tpl-reset');
+    if (resetBtn) resetBtn.onclick = resetTemplates;
+
     body.querySelectorAll('button[data-act]').forEach(function (b) {
       b.onclick = function () {
         var id = b.getAttribute('data-id');
-        if (b.getAttribute('data-act') === 'sample') showSampleModal(id);
-        else useTemplate(id);
+        var act = b.getAttribute('data-act');
+        if (act === 'sample') showSampleModal(id);
+        else if (act === 'use') useTemplate(id);
+        else if (act === 'edit') editTemplateModal(id);
+        else if (act === 'del') deleteTemplate(id);
+        else if (act === 'video') showVideoModal(id, parseInt(b.getAttribute('data-vi'), 10));
       };
     });
+  }
+
+  /* ---- 恢复出厂模板 ---- */
+  function resetTemplates() {
+    App.ui.modal(
+      '恢复出厂模板',
+      '<div class="notice">将丢弃你对模板的全部修改、新增和删除，恢复为系统内置的 ' + factoryTpls.length + ' 个模板。此操作不可撤销，确定继续吗？</div>',
+      '<button class="btn" id="vf-reset-cancel">取消</button>' +
+      '<button class="btn btn-danger" id="vf-reset-ok">恢复出厂</button>'
+    );
+    document.getElementById('vf-reset-cancel').onclick = App.ui.closeModal;
+    document.getElementById('vf-reset-ok').onclick = function () {
+      App.data.videoTemplates = JSON.parse(JSON.stringify(factoryTpls));
+      deletedIds = [];
+      try { localStorage.removeItem(TPL_KEY); } catch (e) {}
+      App.ui.closeModal();
+      drawBody();
+      App.ui.toast('已恢复出厂模板', 'ok');
+    };
+  }
+
+  /* ---- 删除模板 ---- */
+  function deleteTemplate(id) {
+    var t = findTemplate(id);
+    if (!t) return;
+    App.ui.modal(
+      '删除模板',
+      '<div class="notice">确定删除模板「' + App.esc(t.name) + '」吗？' +
+      (t.custom ? '自定义模板删除后无法找回。' : '内置模板删除后，可通过「恢复出厂模板」找回。') + '</div>',
+      '<button class="btn" id="vf-del-cancel">取消</button>' +
+      '<button class="btn btn-danger" id="vf-del-ok">删除</button>'
+    );
+    document.getElementById('vf-del-cancel').onclick = App.ui.closeModal;
+    document.getElementById('vf-del-ok').onclick = function () {
+      var list = App.data.videoTemplates;
+      var i = list.indexOf(t);
+      if (i >= 0) list.splice(i, 1);
+      if (!t.custom && deletedIds.indexOf(id) < 0) deletedIds.push(id);
+      saveTemplates();
+      App.ui.closeModal();
+      drawBody();
+      App.ui.toast('已删除模板「' + t.name + '」');
+    };
+  }
+
+  /* ---- 案例视频播放 ---- */
+  function isDirectVideo(url) {
+    return /\.(mp4|webm|ogv|ogg|mov|m4v)(\?[^#]*)?(#.*)?$/i.test(String(url || ''));
+  }
+
+  function showVideoModal(tplId, vi) {
+    var t = findTemplate(tplId);
+    if (!t || !t.videos || !t.videos[vi]) return;
+    var v = t.videos[vi];
+    var inner;
+    if (isDirectVideo(v.url)) {
+      inner = '<video controls preload="metadata" style="width:100%;max-height:62vh;background:#000;border-radius:8px;display:block" src="' + App.esc(v.url) + '"></video>' +
+        '<div class="small muted mt8">无法播放？请检查链接是否为视频直链（mp4/webm 等），以及当前网络能否访问该地址。</div>';
+    } else {
+      inner = '<div class="notice">该链接不是视频直链，将在新窗口打开观看：</div>' +
+        '<div class="small muted mt8" style="word-break:break-all">' + App.esc(v.url) + '</div>' +
+        '<div class="mt8"><a class="btn btn-primary" href="' + App.esc(v.url) + '" target="_blank" rel="noopener">↗ 打开链接观看</a></div>';
+    }
+    App.ui.modal(
+      '案例视频 · ' + (v.title || t.name),
+      inner,
+      '<button class="btn" id="vf-vid-close">关闭</button>',
+      { large: true }
+    );
+    document.getElementById('vf-vid-close').onclick = App.ui.closeModal;
+  }
+
+  /* ---- 新建 / 编辑模板弹窗 ---- */
+  function editTemplateModal(id) {
+    var isNew = !id;
+    var orig = isNew ? null : findTemplate(id);
+    if (!isNew && !orig) return;
+    // 编辑操作全部作用在草稿上，点「保存」才写回
+    var draft = isNew
+      ? { name: '', duration: '30-45秒', bestFor: '', structure: [], sample: [], videos: [], custom: true }
+      : JSON.parse(JSON.stringify(orig));
+    if (!draft.sample) draft.sample = [];
+    if (!draft.videos) draft.videos = [];
+
+    App.ui.modal(
+      isNew ? '新建模板' : '编辑模板 · ' + orig.name,
+      '<div class="vf-form">' +
+
+      '<div class="vf-f-sec">基本信息</div>' +
+      '<div class="vf-f-grid mb8">' +
+      '<div><label class="field-label">模板名称 *</label>' +
+      '<input class="input" id="vf-f-name" placeholder="例如：门店探访型" value="' + App.esc(draft.name) + '"></div>' +
+      '<div><label class="field-label">时长</label>' +
+      '<input class="input" id="vf-f-duration" placeholder="例如：30-45秒" value="' + App.esc(draft.duration) + '"></div>' +
+      '</div>' +
+      '<div><label class="field-label">适用说明</label>' +
+      '<input class="input" id="vf-f-bestfor" placeholder="这个模板适合什么场景、什么受众" value="' + App.esc(draft.bestFor) + '"></div>' +
+
+      '<div class="vf-f-sec">分镜结构（每行一条，按时间顺序）</div>' +
+      '<textarea class="textarea" id="vf-f-struct" rows="5" placeholder="例如：\n0-3s 钩子：…\n3-15s …\n15-30s 行动号召：…">' +
+      App.esc((draft.structure || []).join('\n')) + '</textarea>' +
+
+      '<div class="vf-f-sec">示例分镜（选填，AI 生成脚本时作为底稿）</div>' +
+      '<div id="vf-f-sample"></div>' +
+      '<button class="btn btn-sm" id="vf-f-sample-add">＋ 添加分镜</button>' +
+
+      '<div class="vf-f-sec">案例视频（展示在模板卡片上，供别人点击观看）</div>' +
+      '<div id="vf-f-videos"></div>' +
+      '<button class="btn btn-sm" id="vf-f-video-add">＋ 添加案例视频</button>' +
+      '<div class="small muted mt8">支持视频直链（mp4/webm 等，可直接在弹窗播放）或普通链接（视频号/YouTube 等，跳转观看）。' +
+      '本地部署时也可填相对路径，如 视频/案例1.mp4。</div>' +
+
+      '</div>',
+      '<button class="btn" id="vf-f-cancel">取消</button>' +
+      '<button class="btn btn-primary" id="vf-f-save">' + (isNew ? '创建模板' : '保存修改') + '</button>',
+      { large: true }
+    );
+
+    /* -- 示例分镜行 -- */
+    var sampleBox = document.getElementById('vf-f-sample');
+    function renderSampleRows() {
+      sampleBox.innerHTML = draft.sample.map(function (s, i) {
+        return '<div class="vf-f-shot">' +
+          '<div class="vf-f-row">' +
+          '<input class="input" style="width:110px;flex:none" data-si="' + i + '" data-sf="shot" placeholder="镜头" value="' + App.esc(s.shot) + '">' +
+          '<input class="input" style="flex:1" data-si="' + i + '" data-sf="visual" placeholder="画面内容" value="' + App.esc(s.visual) + '">' +
+          '<button class="vf-f-del" data-sdel="' + i + '" title="删除这组分镜">✕</button>' +
+          '</div>' +
+          '<div class="vf-f-row">' +
+          '<input class="input" style="flex:1" data-si="' + i + '" data-sf="zh" placeholder="中文字幕" value="' + App.esc(s.zh) + '">' +
+          '<input class="input" style="flex:1" data-si="' + i + '" data-sf="en" placeholder="英文字幕" value="' + App.esc(s.en) + '">' +
+          '<input class="input" style="flex:1" data-si="' + i + '" data-sf="vo" placeholder="配音口播" value="' + App.esc(s.vo) + '">' +
+          '</div>' +
+          '</div>';
+      }).join('') || '<div class="small muted mb8">暂无示例分镜。不填时，AI 生成向导会按上方「分镜结构」逐行生成底稿。</div>';
+
+      sampleBox.querySelectorAll('input[data-si]').forEach(function (inp) {
+        inp.oninput = function () {
+          draft.sample[parseInt(inp.getAttribute('data-si'), 10)][inp.getAttribute('data-sf')] = inp.value;
+        };
+      });
+      sampleBox.querySelectorAll('button[data-sdel]').forEach(function (btn) {
+        btn.onclick = function () {
+          draft.sample.splice(parseInt(btn.getAttribute('data-sdel'), 10), 1);
+          renderSampleRows();
+        };
+      });
+    }
+    renderSampleRows();
+    document.getElementById('vf-f-sample-add').onclick = function () {
+      draft.sample.push({ shot: '', visual: '', zh: '', en: '', vo: '' });
+      renderSampleRows();
+      var inputs = sampleBox.querySelectorAll('input[data-sf="shot"]');
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    };
+
+    /* -- 案例视频行 -- */
+    var videoBox = document.getElementById('vf-f-videos');
+    function renderVideoRows() {
+      videoBox.innerHTML = draft.videos.map(function (v, i) {
+        return '<div class="vf-f-row">' +
+          '<input class="input" style="width:170px;flex:none" data-vi="' + i + '" data-vf="title" placeholder="视频标题" value="' + App.esc(v.title) + '">' +
+          '<input class="input" style="flex:1" data-vi="' + i + '" data-vf="url" placeholder="视频链接（mp4 直链或网页链接）" value="' + App.esc(v.url) + '">' +
+          '<button class="vf-f-del" data-vdel="' + i + '" title="删除该视频">✕</button>' +
+          '</div>';
+      }).join('') || '<div class="small muted mb8">暂无案例视频。</div>';
+
+      videoBox.querySelectorAll('input[data-vi]').forEach(function (inp) {
+        inp.oninput = function () {
+          draft.videos[parseInt(inp.getAttribute('data-vi'), 10)][inp.getAttribute('data-vf')] = inp.value;
+        };
+      });
+      videoBox.querySelectorAll('button[data-vdel]').forEach(function (btn) {
+        btn.onclick = function () {
+          draft.videos.splice(parseInt(btn.getAttribute('data-vdel'), 10), 1);
+          renderVideoRows();
+        };
+      });
+    }
+    renderVideoRows();
+    document.getElementById('vf-f-video-add').onclick = function () {
+      draft.videos.push({ title: '', url: '' });
+      renderVideoRows();
+      var inputs = videoBox.querySelectorAll('input[data-vf="title"]');
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    };
+
+    /* -- 取消 / 保存 -- */
+    document.getElementById('vf-f-cancel').onclick = App.ui.closeModal;
+    document.getElementById('vf-f-save').onclick = function () {
+      var name = document.getElementById('vf-f-name').value.trim();
+      if (!name) { App.ui.toast('请填写模板名称', 'bad'); return; }
+      var structure = document.getElementById('vf-f-struct').value
+        .split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+      if (!structure.length) { App.ui.toast('请至少填写一行分镜结构', 'bad'); return; }
+
+      draft.name = name;
+      draft.duration = document.getElementById('vf-f-duration').value.trim() || '30-45秒';
+      draft.bestFor = document.getElementById('vf-f-bestfor').value.trim();
+      draft.structure = structure;
+      // 丢弃全空的分镜行和没有链接的视频行
+      draft.sample = draft.sample.filter(function (s) {
+        return (s.shot + s.visual + s.zh + s.en + s.vo).trim() !== '';
+      });
+      draft.videos = draft.videos.filter(function (v) { return v.url.trim() !== ''; })
+        .map(function (v) { return { title: v.title.trim(), url: v.url.trim() }; });
+
+      if (isNew) {
+        draft.id = 'vtc' + Date.now();
+        App.data.videoTemplates.push(draft);
+      } else {
+        // 写回原对象，保持数组顺序与引用
+        Object.keys(draft).forEach(function (k) { orig[k] = draft[k]; });
+      }
+      saveTemplates();
+      App.ui.closeModal();
+      drawBody();
+      App.ui.toast(isNew ? '已创建模板「' + name + '」' : '已保存「' + name + '」', 'ok');
+    };
   }
 
   function useTemplate(id) {
@@ -156,7 +450,9 @@
   function showSampleModal(id) {
     var t = findTemplate(id);
     if (!t) return;
-    var tableHtml = '<div style="overflow-x:auto">' + App.ui.table([
+    var tableHtml = (!t.sample || !t.sample.length)
+      ? App.ui.empty('该模板还没有示例分镜，点「编辑模板」添加', '🎬')
+      : '<div style="overflow-x:auto">' + App.ui.table([
       { key: 'shot', label: '镜头', width: '70px', render: function (r) { return '<b>' + App.esc(r.shot) + '</b>'; } },
       { key: 'visual', label: '画面', render: function (r) { return App.esc(r.visual); } },
       { key: 'zh', label: '中文字幕', render: function (r) { return App.esc(r.zh) || '-'; } },
@@ -168,10 +464,15 @@
       t.name + ' · 示例分镜',
       '<div class="small muted mb8">时长 ' + App.esc(t.duration) + ' · ' + App.esc(t.bestFor) + '</div>' + tableHtml,
       '<button class="btn" id="vf-modal-close">关闭</button>' +
+      '<button class="btn" id="vf-modal-edit">编辑模板</button>' +
       '<button class="btn btn-primary" id="vf-modal-use">用此模板生成</button>',
       { large: true }
     );
     document.getElementById('vf-modal-close').onclick = App.ui.closeModal;
+    document.getElementById('vf-modal-edit').onclick = function () {
+      App.ui.closeModal();
+      editTemplateModal(id);
+    };
     document.getElementById('vf-modal-use').onclick = function () {
       App.ui.closeModal();
       useTemplate(id);
@@ -389,7 +690,12 @@
     var t = findTemplate(wiz.templateId);
     var p = findProduct(wiz.productId);
     if (!t || !p) return null;
-    var rows = t.sample.map(function (s) {
+    // 模板没填示例分镜时，按分镜结构逐行生成底稿
+    var sample = (t.sample && t.sample.length) ? t.sample :
+      (t.structure || []).map(function (s, i) {
+        return { shot: '镜头' + (i + 1), visual: s, zh: '', en: '', vo: '' };
+      });
+    var rows = sample.map(function (s) {
       return {
         shot: s.shot,
         visual: adaptText(s.visual, p),
