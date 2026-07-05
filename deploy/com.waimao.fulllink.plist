@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- launchd 开机自启模板（参考）。实际使用请运行 deploy/mac-setup.sh，
+     它会自动把 NODE_BIN / SERVER_DIR 换成你机器上的真实路径并加载。
+     手动使用时，把下面两处占位符替换为真实绝对路径。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.waimao.fulllink</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/你的用户名/cs/server/src/index.js</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/你的用户名/cs/server</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/你的用户名/cs/server/logs/app.log</string>
+  <key>StandardErrorPath</key><string>/Users/你的用户名/cs/server/logs/app.err.log</string>
+</dict>
+</plist>

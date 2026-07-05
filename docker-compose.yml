@@ -25,6 +25,8 @@ services:
     image: unclecode/crawl4ai:latest
     restart: unless-stopped
     shm_size: 1g
+    # Apple 芯片 Mac mini：若该镜像无 arm64 版会拉取失败，取消下一行注释用兼容模式（较慢）
+    # platform: linux/amd64
     # 仅供 app 内网访问，不对外暴露端口
 
   app:

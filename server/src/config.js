@@ -10,6 +10,8 @@ function bool(v) { return !!(v && String(v).trim()); }
 var cfg = {
   port: parseInt(process.env.PORT, 10) || 8080,
   jwtSecret: process.env.JWT_SECRET || 'dev-insecure-secret-change-me',
+  // 出海代理：Mac mini/服务器在境内时，通过它访问 Google/Firecrawl/Hunter 等海外 API
+  outboundProxy: (process.env.OUTBOUND_PROXY || '').trim(),
   admin: {
     email: process.env.ADMIN_EMAIL || 'admin@demo.local',
     password: process.env.ADMIN_PASSWORD || 'admin123'

@@ -10,6 +10,9 @@ var cors = require('cors');
 var cfg = require('./config');
 var store = require('./db/store');
 
+// 若配置了出海代理，让海外 API 请求走代理（境内 Mac mini 场景）
+require('./proxy')();
+
 var app = express();
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));  // 产品图为 dataURL，放宽体积
