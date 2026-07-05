@@ -1,0 +1,6 @@
+# 构建镜像时排除敏感文件与本地产物，避免密钥/依赖被打进镜像层
+**/node_modules
+**/.env
+**/*.log
+server/storage
+.git

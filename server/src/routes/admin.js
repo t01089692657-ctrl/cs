@@ -11,16 +11,17 @@ var bcrypt = require('bcryptjs');
 var router = express.Router();
 var store = require('../db/store');
 var auth = require('../auth');
+var ah = require('../asyncHandler');
 
 router.use(auth.requireAuth, auth.requireRole('admin'));
 
 var ROLES = ['admin', 'sales', 'ops'];
 
-router.get('/users', async function (req, res) {
+router.get('/users', ah(async function (req, res) {
   res.json(await store.users.list());
-});
+}));
 
-router.post('/users', async function (req, res) {
+router.post('/users', ah(async function (req, res) {
   var b = req.body || {};
   var email = (b.email || '').trim();
   if (!email || !b.password) return res.status(400).json({ error: '请填写邮箱和初始密码' });
@@ -34,9 +35,9 @@ router.post('/users', async function (req, res) {
   await store.users.create(user);
   await store.audit.log({ user_id: req.user.sub, user_email: req.user.email, action: 'user:create', detail: { email: email, role: user.role } });
   res.json({ id: user.id, email: user.email, name: user.name, role: user.role, active: true });
-});
+}));
 
-router.patch('/users/:id', async function (req, res) {
+router.patch('/users/:id', ah(async function (req, res) {
   var b = req.body || {};
   var patch = {};
   if (b.name != null) patch.name = b.name;
@@ -47,18 +48,18 @@ router.patch('/users/:id', async function (req, res) {
   if (!u) return res.status(404).json({ error: '用户不存在' });
   await store.audit.log({ user_id: req.user.sub, user_email: req.user.email, action: 'user:update', detail: { id: req.params.id, fields: Object.keys(patch) } });
   res.json({ ok: true });
-});
+}));
 
-router.delete('/users/:id', async function (req, res) {
+router.delete('/users/:id', ah(async function (req, res) {
   if (req.params.id === req.user.sub) return res.status(400).json({ error: '不能删除自己' });
   await store.users.remove(req.params.id);
   await store.audit.log({ user_id: req.user.sub, user_email: req.user.email, action: 'user:delete', detail: { id: req.params.id } });
   res.json({ ok: true });
-});
+}));
 
-router.get('/audit', async function (req, res) {
+router.get('/audit', ah(async function (req, res) {
   var limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
   res.json(await store.audit.list(limit));
-});
+}));
 
 module.exports = router;

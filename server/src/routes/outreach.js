@@ -9,11 +9,12 @@ var router = express.Router();
 var auth = require('../auth');
 var store = require('../db/store');
 var mailer = require('../services/mailer');
+var ah = require('../asyncHandler');
 
 router.use(auth.requireAuth);
 
 // 保存发信邮箱（授权码不回传前端）
-router.put('/account', async function (req, res) {
+router.put('/account', ah(async function (req, res) {
   var a = req.body || {};
   if (!a.email) return res.status(400).json({ error: '请填写邮箱地址' });
   await store.settings.set('email_account', {
@@ -23,33 +24,28 @@ router.put('/account', async function (req, res) {
   });
   await store.audit.log({ user_id: req.user.sub, user_email: req.user.email, action: 'email-account:save', detail: { email: a.email } });
   res.json({ ok: true });
-});
+}));
 
-router.get('/account', async function (req, res) {
+router.get('/account', ah(async function (req, res) {
   var a = await store.settings.get('email_account');
   if (!a) return res.json(null);
   res.json({ name: a.name, email: a.email, host: a.host, port: a.port, configured: !!a.auth });
-});
+}));
 
 // 批量发送开发信
-router.post('/send', async function (req, res) {
+router.post('/send', ah(async function (req, res) {
   var recipients = (req.body && req.body.recipients) || [];
   var template = (req.body && req.body.template) || {};
   if (!recipients.length) return res.status(400).json({ error: '没有收件人' });
   var account = await store.settings.get('email_account');
   if (!account || !account.email) return res.status(400).json({ error: '未配置发信邮箱' });
-  try {
-    var result = await mailer.sendBatch(recipients, template, account);
-    await store.audit.log({
-      user_id: req.user.sub, user_email: req.user.email,
-      action: 'outreach:send',
-      detail: { count: recipients.length, sent: result.sent, mode: result.mode }
-    });
-    res.json(result);
-  } catch (e) {
-    console.error('[outreach] 失败:', e);
-    res.status(500).json({ error: '发送失败: ' + e.message });
-  }
-});
+  var result = await mailer.sendBatch(recipients, template, account);
+  await store.audit.log({
+    user_id: req.user.sub, user_email: req.user.email,
+    action: 'outreach:send',
+    detail: { count: recipients.length, sent: result.sent, mode: result.mode }
+  });
+  res.json(result);
+}));
 
 module.exports = router;

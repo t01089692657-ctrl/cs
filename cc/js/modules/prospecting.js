@@ -36,6 +36,8 @@
   function countryEn(c) { return COUNTRY_EN[c] || c; }
 
   /* ---------- 小工具 ---------- */
+  function isLiveMode() { return window.App && App.isLive && App.isLive(); }
+
   function findProspect(id) {
     var list = App.data.prospects;
     for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
@@ -641,6 +643,13 @@
         var b2 = body.querySelector('#ch-harvest');
         if (b2) b2.disabled = false;
         App.ui.toast('全渠道扫描完成，共发现 ' + results.length + ' 家潜在客户', 'ok');
+      }).catch(function (e) {
+        // 失败也要解锁按钮，否则会永久卡住无法再次获客
+        harvesting = false;
+        if (document.contains(box)) box.innerHTML = '';
+        var b3 = body.querySelector('#ch-harvest');
+        if (b3) b3.disabled = false;
+        App.ui.toast('获客失败：' + (e && e.message || e), 'bad');
       });
     }
     step();
@@ -758,7 +767,9 @@
       '<div class="ai-box"><div class="bold mb8">' + hl(d0.subject) + '</div>' +
       '<div class="small" style="white-space:pre-wrap;line-height:1.7">' + hl(d0.body) + '</div></div>' +
       '<div class="notice mt12">发送后这些公司自动录入「潜客发现」并进入触达序列（D3/D7/D14 自动跟进，对方回复即停）。' +
-      '当前为演示模式，不会真实发出；部署后由服务器通过你的邮箱 SMTP 真实发送。</div>' +
+      (isLiveMode()
+        ? '<b class="text-warn">将通过你的邮箱真实发出，请确认收件人无误。</b>'
+        : '当前为演示模式，不会真实发出；部署后由服务器通过你的邮箱 SMTP 真实发送。') + '</div>' +
       '<div id="send-progress"></div>',
       '<button class="btn" id="send-cancel">取消</button>' +
       '<button class="btn btn-primary" id="send-ok">确认发送 ' + items.length + ' 封</button>');
@@ -791,7 +802,12 @@
         App.ui.closeModal();
         var bodyEl = document.getElementById('pros-body');
         if (bodyEl && state.tab === 'channels') renderChannels(bodyEl);
-        App.ui.toast('已发送 ' + res.sent + ' 封开发信（演示模式），对应公司已进入触达序列', 'ok');
+        App.ui.toast('已发送 ' + res.sent + ' 封开发信' + (res.mode === 'demo' ? '（演示模式）' : '') + '，对应公司已进入触达序列', 'ok');
+      }).catch(function (e) {
+        // 失败要停掉转圈、解锁按钮并提示，避免弹窗永久卡住
+        stop();
+        okBtn.disabled = false;
+        App.ui.toast('发送失败：' + (e && e.message || e), 'bad');
       });
     };
   }

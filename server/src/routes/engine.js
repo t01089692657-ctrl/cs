@@ -9,10 +9,11 @@ var router = express.Router();
 var auth = require('../auth');
 var store = require('../db/store');
 var cfg = require('../config');
+var ah = require('../asyncHandler');
 
 router.use(auth.requireAuth);
 
-router.get('/', async function (req, res) {
+router.get('/', ah(async function (req, res) {
   var mode = await store.settings.get('discovery_mode');
   res.json({
     configured: {
@@ -25,13 +26,13 @@ router.get('/', async function (req, res) {
     ready: cfg.llm.live && cfg.crawl.live,   // 有大模型 + 抓取即可真实获客
     mode: mode || 'compliant'
   });
-});
+}));
 
-router.put('/mode', async function (req, res) {
+router.put('/mode', ah(async function (req, res) {
   var mode = (req.body && req.body.mode) === 'full' ? 'full' : 'compliant';
   await store.settings.set('discovery_mode', mode);
   await store.audit.log({ user_id: req.user.sub, user_email: req.user.email, action: 'engine:mode', detail: { mode: mode } });
   res.json({ ok: true, mode: mode });
-});
+}));
 
 module.exports = router;

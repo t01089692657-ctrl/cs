@@ -71,6 +71,21 @@ var cfg = {
   }
 };
 
+// 生产环境（配置了数据库=真实部署）启动前的安全校验：
+// 拒绝使用源码/模板里公开的默认签名密钥和默认管理员密码，避免被伪造令牌接管。
+var INSECURE_SECRETS = ['', 'dev-insecure-secret-change-me', 'change-me-to-a-long-random-string'];
+var INSECURE_PASSWORDS = ['', 'admin123', 'change-this-password'];
+cfg.securityProblems = function () {
+  var problems = [];
+  if (INSECURE_SECRETS.indexOf(process.env.JWT_SECRET || '') >= 0 || cfg.jwtSecret.length < 16) {
+    problems.push('JWT_SECRET 未设置或仍是默认/占位值，请改成一串足够长的随机字符串');
+  }
+  if (INSECURE_PASSWORDS.indexOf(process.env.ADMIN_PASSWORD || '') >= 0) {
+    problems.push('ADMIN_PASSWORD 未设置或仍是默认值，请设置一个强密码');
+  }
+  return problems;
+};
+
 // 汇总各能力的运行模式，供 /api/health 展示
 cfg.modes = function () {
   return {

@@ -8,6 +8,10 @@ var path = require('path');
 function createPgStore(databaseUrl) {
   var Pool = require('pg').Pool;
   var pool = new Pool({ connectionString: databaseUrl, max: 10 });
+  // 关键：监听空闲连接错误，否则 DB 重启/网络抖动会让 Node 抛未捕获异常并崩溃
+  pool.on('error', function (err) {
+    console.error('[pg] 空闲连接错误（连接池将自动重建）:', err.message);
+  });
 
   async function q(text, params) {
     var res = await pool.query(text, params);

@@ -74,16 +74,16 @@ window.App = (function () {
       return App.api.get('/api/collections');
     }).then(function (cols) {
       PERSIST_KEYS.forEach(function (k) {
-        if (cols && k in cols && cols[k] != null) {
-          App.data[k] = cols[k];
-          snapshot[k] = JSON.stringify(cols[k]);
-        }
+        if (cols && k in cols && cols[k] != null) App.data[k] = cols[k];
       });
       // videoTemplates 也走服务器（模板 10 人共享）
-      if (cols && cols.videoTemplates != null) {
-        App.data.videoTemplates = cols.videoTemplates;
-        snapshot.videoTemplates = JSON.stringify(cols.videoTemplates);
-      }
+      if (cols && cols.videoTemplates != null) App.data.videoTemplates = cols.videoTemplates;
+      // 为全部键建立基线快照：服务器已有的用服务器值，服务器没有的用内置默认值。
+      // 这样内置示例数据不会因为用户改了别的集合就被“同步”上去覆盖他人数据，
+      // 只有用户真正改动某集合时，该集合才会被推送。
+      LIVE_KEYS.forEach(function (k) {
+        if (App.data[k] != null) snapshot[k] = JSON.stringify(App.data[k]);
+      });
       return App.services && App.services._preload ? App.services._preload() : null;
     }).then(function () {
       finishStart();
@@ -115,14 +115,16 @@ window.App = (function () {
 
   App.persist = function () {
     if (App.isLive && App.isLive()) {
-      // 只推送变化过的集合
+      // 只推送变化过的集合；快照仅在保存成功后推进，失败则下次自动重试
       LIVE_KEYS.forEach(function (k) {
         if (App.data[k] == null) return;
         var cur = JSON.stringify(App.data[k]);
         if (cur === snapshot[k]) return;
-        snapshot[k] = cur;
-        App.api.put('/api/collections/' + k, { data: App.data[k] })
-          .catch(function (e) { App.ui.toast('保存到服务器失败：' + e.message, 'bad'); });
+        (function (key, payload) {
+          App.api.put('/api/collections/' + key, { data: App.data[key] })
+            .then(function () { snapshot[key] = payload; })
+            .catch(function (e) { App.ui.toast('保存到服务器失败（稍后自动重试）：' + e.message, 'bad'); });
+        })(k, cur);
       });
       return true;
     }
@@ -171,7 +173,8 @@ window.App = (function () {
 
   function currentId() {
     var h = (location.hash || '').replace(/^#\//, '');
-    return h && modules[h] ? h : 'dashboard';
+    // 仅允许当前可见的模块（如管理后台仅在线管理员可见），否则回工作台
+    return h && modules[h] && moduleVisible(modules[h]) ? h : 'dashboard';
   }
 
   // 管理后台等仅管理员模块：仅在线且当前用户为 admin 时显示

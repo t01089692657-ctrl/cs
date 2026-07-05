@@ -31,13 +31,30 @@ var FRONT = path.join(__dirname, '..', '..', 'cc');
 app.use(express.static(FRONT));
 app.get('/', function (req, res) { res.sendFile(path.join(FRONT, 'index.html')); });
 
-// 统一错误兜底
+// 统一错误兜底：不把内部错误细节回传给客户端（避免信息泄露），仅服务端记录
 app.use(function (err, req, res, next) {
-  console.error('[error]', err);
-  res.status(500).json({ error: '服务器错误: ' + (err && err.message || err) });
+  console.error('[error]', req.method, req.path, err && err.stack || err);
+  res.status(500).json({ error: '服务器繁忙，请稍后重试' });
 });
 
+// 进程级兜底：记录但不退出，避免单个异步异常拖垮整个服务
+process.on('unhandledRejection', function (e) { console.error('[unhandledRejection]', e && e.stack || e); });
+process.on('uncaughtException', function (e) { console.error('[uncaughtException]', e && e.stack || e); });
+
 async function start() {
+  // 真实部署（配了数据库）前，拒绝使用默认/占位的签名密钥与管理员密码
+  if (cfg.db.live) {
+    var problems = cfg.securityProblems();
+    if (problems.length) {
+      console.error('❌ 安全配置不合格，拒绝启动：');
+      problems.forEach(function (p) { console.error('   - ' + p); });
+      console.error('请修改 server/.env 后重试。');
+      process.exit(1);
+    }
+  } else {
+    var warn = cfg.securityProblems();
+    if (warn.length) console.warn('[warn] 演示模式放行，但上线前请修复：' + warn.join('；'));
+  }
   try {
     await store.bootstrap();
     console.log('[db] 存储模式:', store.kind);
