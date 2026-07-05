@@ -42,10 +42,14 @@
   var factoryTpls = null;   // 内置模板快照（深拷贝，用于恢复出厂）
   var deletedIds = [];      // 用户删除过的内置模板 id（防止刷新后复活）
 
+  function isLive() { return window.App && App.isLive && App.isLive(); }
+
   function initTemplates() {
     if (tplInited) return;
     tplInited = true;
     factoryTpls = JSON.parse(JSON.stringify(App.data.videoTemplates));
+    // 在线模式：模板由服务器加载（app.js 启动时已放入 App.data.videoTemplates），此处不读 localStorage
+    if (isLive()) return;
     var stored = null;
     try { stored = JSON.parse(localStorage.getItem(TPL_KEY) || 'null'); } catch (e) { stored = null; }
     // 注意：空数组也是有效的工作副本（用户把模板全删了），只有「从未存过」才用内置数据
@@ -61,6 +65,7 @@
   }
 
   function saveTemplates() {
+    if (isLive()) { App.persist(); return; } // 在线模式：videoTemplates 走服务器（10 人共享）
     try {
       localStorage.setItem(TPL_KEY, JSON.stringify({ templates: App.data.videoTemplates, deleted: deletedIds }));
     } catch (e) { /* 隐私模式等存储不可用时，修改仅本次会话内有效 */ }
@@ -262,7 +267,8 @@
     document.getElementById('vf-reset-ok').onclick = function () {
       App.data.videoTemplates = JSON.parse(JSON.stringify(factoryTpls));
       deletedIds = [];
-      try { localStorage.removeItem(TPL_KEY); } catch (e) {}
+      if (isLive()) { App.persist(); }
+      else { try { localStorage.removeItem(TPL_KEY); } catch (e) {} }
       App.ui.closeModal();
       drawBody();
       App.ui.toast('已恢复出厂模板', 'ok');

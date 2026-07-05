@@ -8,52 +8,80 @@
   'use strict';
   var S = {};
 
+  function live() { return window.App && App.isLive && App.isLive(); }
+
+  // 在线模式下预载服务端配置到缓存，供同步 UI 读取（app.js 启动时调用）
+  var cache = { emailAccount: null, engine: null };
+  S._preload = function () {
+    if (!live()) return Promise.resolve();
+    return Promise.all([
+      App.api.get('/api/outreach/account').then(function (a) { cache.emailAccount = a; }).catch(function () {}),
+      App.api.get('/api/engine').then(function (e) { cache.engine = e; }).catch(function () {})
+    ]);
+  };
+
   /* ================================================================
    * 一、发信邮箱账号
-   * 演示：配置保存在本浏览器 localStorage。
-   * 正式版：POST /api/email-account 保存到服务器（密码/授权码只存服务器端），
-   *         发送时由服务器用 SMTP 连接该邮箱发出。
+   * 演示：localStorage。在线：服务器（授权码只存服务器端，不回传前端）。
    * ================================================================ */
   var EMAIL_KEY = 'email_account_v1';
   S.emailAccount = {
     get: function () {
+      if (live()) return cache.emailAccount;
       try { return JSON.parse(localStorage.getItem(EMAIL_KEY) || 'null'); } catch (e) { return null; }
     },
     save: function (acc) {
+      if (live()) {
+        // 乐观更新缓存（不含授权码），后台 PUT 到服务器
+        cache.emailAccount = { name: acc.name, email: acc.email, host: acc.host, port: acc.port, configured: !!acc.auth };
+        App.api.put('/api/outreach/account', acc).catch(function (e) { App.ui.toast('保存邮箱失败：' + e.message, 'bad'); });
+        return true;
+      }
       try { localStorage.setItem(EMAIL_KEY, JSON.stringify(acc)); return true; } catch (e) { return false; }
     },
     clear: function () {
+      if (live()) { cache.emailAccount = null; return; }
       try { localStorage.removeItem(EMAIL_KEY); } catch (e) {}
     }
   };
 
   /* ================================================================
-   * 二、获客引擎配置（Crawl4AI 自建 + Firecrawl 兜底 + 找邮箱 API + LLM）
-   * 演示：配置存本浏览器；未配置 key 时 discoverProspects 用模拟数据。
-   * 正式版：配置存服务器，后端「获客 agent」按此编排：
-   *   LLM(打分/写信) + 搜索/海关数据(找公司) + Crawl4AI/Firecrawl(扒官网) + Hunter/Apollo(找邮箱)
-   * 详见仓库根目录《获客引擎-部署说明.md》。
+   * 二、获客引擎配置
+   * 演示：localStorage（可在前端填 key）。
+   * 在线：引擎 key 来自服务器 .env，前端只读状态；模式切换存服务器（10 人共享）。
    * ================================================================ */
   var ENGINE_KEY = 'prospecting_engine_v1';
   var MODE_KEY = 'prospecting_mode_v1';
   S.engine = {
+    // 在线模式返回 null（引擎在服务器配置，前端不编辑）
     get: function () {
+      if (live()) return null;
       try { return JSON.parse(localStorage.getItem(ENGINE_KEY) || 'null'); } catch (e) { return null; }
     },
     save: function (cfg) {
+      if (live()) return false; // 在线模式引擎在服务器 .env 配置
       try { localStorage.setItem(ENGINE_KEY, JSON.stringify(cfg)); return true; } catch (e) { return false; }
     },
-    clear: function () { try { localStorage.removeItem(ENGINE_KEY); } catch (e) {} },
-    // 引擎是否可用：要有 LLM key，且至少一种抓取方式（Firecrawl key 或 Crawl4AI 地址）
+    clear: function () { if (live()) return; try { localStorage.removeItem(ENGINE_KEY); } catch (e) {} },
     ready: function () {
+      if (live()) return !!(cache.engine && cache.engine.ready);
       var c = S.engine.get();
       return !!(c && c.llmKey && (c.firecrawlKey || c.crawl4aiUrl));
     },
-    // 数据来源模式：compliant=只用合规 API 源；full=也抓 LinkedIn/社媒（可随时切换）
+    // 在线模式返回服务端各能力配置状态（供只读展示）
+    status: function () { return live() ? (cache.engine && cache.engine.configured) || null : null; },
     getMode: function () {
+      if (live()) return (cache.engine && cache.engine.mode) || 'compliant';
       try { return localStorage.getItem(MODE_KEY) || 'compliant'; } catch (e) { return 'compliant'; }
     },
-    setMode: function (m) { try { localStorage.setItem(MODE_KEY, m); } catch (e) {} }
+    setMode: function (m) {
+      if (live()) {
+        if (cache.engine) cache.engine.mode = m;
+        App.api.put('/api/engine/mode', { mode: m }).catch(function (e) { App.ui.toast('切换模式失败：' + e.message, 'bad'); });
+        return;
+      }
+      try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
+    }
   };
 
   /* 各渠道：compliant=合规 API 源（默认就跑）；社媒抓取仅「全网模式」启用 */
@@ -99,6 +127,12 @@
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
   S.discoverProspects = function (opts) {
+    // 在线模式：调服务器获客 agent（真实抓取或服务端演示）
+    if (live()) {
+      return App.api.post('/api/discover', {
+        keyword: opts.keyword, countries: opts.countries, mode: opts.mode || 'compliant'
+      }).then(function (d) { return (d && d.results) || []; });
+    }
     var kw = (opts.keyword || 'product').split(/[\/(（]/)[0].trim();       // 取关键词第一段
     var kwCap = kw.split(' ').slice(0, 2).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(' ');
     var countries = (opts.countries && opts.countries.length) ? opts.countries : ['美国'];
@@ -158,6 +192,9 @@
    *         控制发送频率与退订合规，返回 {sent, failed, details}。
    * ================================================================ */
   S.sendOutreach = function (account, recipients, template) {
+    if (live()) {
+      return App.api.post('/api/outreach/send', { recipients: recipients, template: template });
+    }
     return new Promise(function (res) {
       setTimeout(function () {
         res({ sent: recipients.length, failed: 0, mode: 'demo' });

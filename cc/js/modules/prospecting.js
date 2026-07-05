@@ -507,6 +507,26 @@
 
   /* ---- 获客引擎配置（Crawl4AI 自建 + Firecrawl 兜底 + 找邮箱 + LLM） ---- */
   function engineConfigModal(onSaved) {
+    // 在线模式：引擎 key 在服务器 .env 配置，前端只读展示状态
+    if (window.App && App.isLive && App.isLive()) {
+      var st = App.services.engine.status() || {};
+      function row(label, ok) {
+        return '<dt>' + label + '</dt><dd>' + (ok ? '<span class="text-ok">已配置</span>' : '<span class="text-warn">未配置</span>') + '</dd>';
+      }
+      App.ui.modal('获客引擎状态',
+        '<div class="notice mb12">在线模式下，获客引擎的各项 API Key 由管理员在服务器 <code>.env</code> 中配置（不在前端填写，更安全）。当前状态：</div>' +
+        '<dl class="kv">' +
+        row('大模型（打分/写信）', st.llm) +
+        row('抓取引擎（Crawl4AI/Firecrawl）', st.crawl) +
+        row('搜索找公司（SerpAPI）', st.search) +
+        row('找邮箱（Hunter/Apollo）', st.emailFinder) +
+        row('发信 SMTP', st.smtp) +
+        '</dl>' +
+        '<div class="small muted mt8">需要调整请联系管理员修改服务器配置并重启服务。配置方法见《获客引擎-部署说明.md》。</div>',
+        '<button class="btn btn-primary" id="en-ok">知道了</button>');
+      document.getElementById('en-ok').onclick = App.ui.closeModal;
+      return;
+    }
     var c = App.services.engine.get() || {
       llmProvider: 'OpenAI', llmKey: '',
       crawl4aiUrl: '', firecrawlKey: '',

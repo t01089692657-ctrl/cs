@@ -12,7 +12,7 @@ window.App = (function () {
     { section: '流量端 · 解决进线', ids: ['video-factory', 'ads', 'prospecting'] },
     { section: '销转端 · 复制销冠', ids: ['leads', 'crm', 'whatsapp', 'analysis', 'qualify'] },
     { section: '企业管理端 · 提效', ids: ['tech-avatar', 'boss-avatar', 'hr-finance'] },
-    { section: '系统设置', ids: ['knowledge'] }
+    { section: '系统设置', ids: ['knowledge', 'admin'] }
   ];
 
   var modules = {};   // id -> {id, nav:{section,label,icon}, render(el)}
@@ -35,22 +35,73 @@ window.App = (function () {
 
   App.start = function () {
     App.data = window.AppData;
-    loadPersisted();
+    // 先探测后端：有则在线模式（需登录、数据走服务器），无则演示模式（localStorage）
+    (App.api ? App.api.detect() : Promise.resolve(false)).then(function (live) {
+      if (live) return startLive();
+      return startDemo();
+    }).catch(function (e) {
+      console.warn('启动探测失败，回退演示模式:', e);
+      startDemo();
+    });
+  };
+
+  function finishStart() {
     dataHooks.forEach(function (fn) {
       try { fn(); } catch (e) { console.warn('onDataReady 回调出错:', e); }
     });
     document.getElementById('company-name').textContent = App.data.company.name;
     buildNav();
+    App.renderUserChip();
+    window.removeEventListener('hashchange', route);
     window.addEventListener('hashchange', route);
     route();
-  };
+  }
 
-  /* ---------- 数据持久化（浏览器 localStorage，原型阶段） ----------
-   * 产品库 / 视频仓库 / 视频项目的用户修改保存在本浏览器，刷新不丢。
-   * 正式版部署服务器后替换为后端数据库，全公司共享。
+  // 演示模式：与从前完全一致（localStorage）
+  function startDemo() {
+    App.mode = 'demo';
+    loadPersisted();
+    finishStart();
+  }
+
+  // 在线模式：需登录 → 从服务器加载共享数据 → 预载服务配置
+  function startLive() {
+    App.mode = 'live';
+    if (!App.api.token()) { App.api.showLogin(); return Promise.resolve(); }
+    return App.api.get('/api/auth/me').then(function (me) {
+      App.api.user = me;
+    }).then(function () {
+      return App.api.get('/api/collections');
+    }).then(function (cols) {
+      PERSIST_KEYS.forEach(function (k) {
+        if (cols && k in cols && cols[k] != null) {
+          App.data[k] = cols[k];
+          snapshot[k] = JSON.stringify(cols[k]);
+        }
+      });
+      // videoTemplates 也走服务器（模板 10 人共享）
+      if (cols && cols.videoTemplates != null) {
+        App.data.videoTemplates = cols.videoTemplates;
+        snapshot.videoTemplates = JSON.stringify(cols.videoTemplates);
+      }
+      return App.services && App.services._preload ? App.services._preload() : null;
+    }).then(function () {
+      finishStart();
+    }).catch(function (e) {
+      // token 失效等：回登录页
+      App.api.setToken('');
+      App.api.showLogin(e.message || '登录状态失效，请重新登录');
+    });
+  }
+
+  /* ---------- 数据持久化 ----------
+   * 演示模式：浏览器 localStorage。
+   * 在线模式：只把“变化过的集合”PUT 到服务器（按快照 diff，避免重复上传大图）。
    */
   var PERSIST_KEYS = ['products', 'videoQueue', 'videoProjects', 'icp', 'prospects'];
+  var LIVE_KEYS = PERSIST_KEYS.concat(['videoTemplates']);
   var PERSIST_STORE = 'app_data_v1';
+  var snapshot = {};  // 在线模式：key -> 上次已推送内容的 JSON，用于 diff
 
   function loadPersisted() {
     var s = null;
@@ -63,6 +114,18 @@ window.App = (function () {
   }
 
   App.persist = function () {
+    if (App.isLive && App.isLive()) {
+      // 只推送变化过的集合
+      LIVE_KEYS.forEach(function (k) {
+        if (App.data[k] == null) return;
+        var cur = JSON.stringify(App.data[k]);
+        if (cur === snapshot[k]) return;
+        snapshot[k] = cur;
+        App.api.put('/api/collections/' + k, { data: App.data[k] })
+          .catch(function (e) { App.ui.toast('保存到服务器失败：' + e.message, 'bad'); });
+      });
+      return true;
+    }
     try {
       var s = {};
       PERSIST_KEYS.forEach(function (k) { s[k] = App.data[k]; });
@@ -111,12 +174,19 @@ window.App = (function () {
     return h && modules[h] ? h : 'dashboard';
   }
 
+  // 管理后台等仅管理员模块：仅在线且当前用户为 admin 时显示
+  function moduleVisible(m) {
+    if (!m) return false;
+    if (m.adminOnly) return App.mode === 'live' && App.api && App.api.user && App.api.user.role === 'admin';
+    return true;
+  }
+
   function buildNav() {
     var nav = document.getElementById('nav');
     var html = '';
     var placed = {};
     NAV_SECTIONS.forEach(function (sec) {
-      var items = sec.ids.filter(function (id) { return modules[id]; });
+      var items = sec.ids.filter(function (id) { return modules[id] && moduleVisible(modules[id]); });
       if (!items.length) return;
       html += '<div class="nav-section">' + sec.section + '</div>';
       items.forEach(function (id) {
@@ -128,7 +198,7 @@ window.App = (function () {
     });
     // 未在预设顺序里的模块兜底展示
     Object.keys(modules).forEach(function (id) {
-      if (!placed[id]) {
+      if (!placed[id] && moduleVisible(modules[id])) {
         var m = modules[id];
         html += '<a class="nav-item" data-id="' + id + '" href="#/' + id + '">' +
           '<span class="nav-icon">' + (m.nav.icon || '·') + '</span>' + m.nav.label + '</a>';
@@ -136,6 +206,19 @@ window.App = (function () {
     });
     nav.innerHTML = html;
   }
+
+  // 顶栏显示当前登录用户 + 退出（仅在线模式）
+  App.renderUserChip = function () {
+    if (App.mode !== 'live' || !App.api || !App.api.user) return;
+    var el = document.getElementById('company-name');
+    if (!el) return;
+    var u = App.api.user;
+    el.innerHTML = App.esc(App.data.company.name) + ' · <b>' + App.esc(u.name || u.email) + '</b>（' +
+      ({ admin: '管理员', sales: '销售', ops: '运营' }[u.role] || u.role) + '） ' +
+      '<a href="#" id="logout-link" style="color:var(--muted);font-size:12px">退出</a>';
+    var lk = document.getElementById('logout-link');
+    if (lk) lk.onclick = function (e) { e.preventDefault(); App.api.logout(); };
+  };
 
   function route() {
     var id = currentId();

@@ -1,0 +1,49 @@
+# ============ 外贸全链路 AI 系统 · 一键部署编排 ============
+# 用法：在服务器上 cp server/.env.example server/.env，填好 key，然后：
+#   docker compose up -d
+# 即启动：数据库(db) + 应用(app) + 抓取引擎(crawl4ai)。
+# nginx/HTTPS 见 deploy/ 目录。
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: waimao
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-waimao_pw_change_me}
+      POSTGRES_DB: waimao
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waimao"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 自建抓取引擎（获客用，跑大批量）。Firecrawl 作为兜底走托管 API，无需本地容器。
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    restart: unless-stopped
+    shm_size: 1g
+    # 仅供 app 内网访问，不对外暴露端口
+
+  app:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - server/.env
+    environment:
+      # 覆盖 .env 里的这两项，指向 compose 内网服务
+      DATABASE_URL: postgres://waimao:${DB_PASSWORD:-waimao_pw_change_me}@db:5432/waimao
+      CRAWL4AI_URL: http://crawl4ai:11235
+      PORT: 8080
+    ports:
+      - "8080:8080"   # 生产建议前置 nginx 做 HTTPS，见 deploy/nginx.conf
+
+volumes:
+  pgdata:
