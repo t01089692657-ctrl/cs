@@ -22,6 +22,7 @@
   var state = { tab: 'tpl', projFilter: 'all' };   // tpl | wiz | queue
   var wiz = newWiz();
   var rootEl = null;
+  var ffmpegCap = false;   // 服务器是否有 ffmpeg（可真实出片），在线模式启动时探测
 
   /* ---------- 生成 API 配置（原型阶段占位，部署服务器后接真实视频生成 API） ---------- */
   var API_STORE = 'vf_api_config_v1';
@@ -114,6 +115,27 @@
     rootEl = el;
     initTemplates();
     draw();
+    // 在线模式：探测服务器是否有 ffmpeg（可真实出片），拿到后刷新仓库的按钮
+    if (isLive() && App.api && !ffmpegCap) {
+      App.api.get('/api/video/capabilities').then(function (c) {
+        if (c && c.ffmpeg) { ffmpegCap = true; if (state.tab === 'queue') drawBody(); }
+      }).catch(function () {});
+    }
+  }
+
+  /* ---------- 真实合成：调用服务器 ffmpeg 引擎出片 ---------- */
+  function composeVideo(item, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中…'; }
+    App.ui.toast('正在用产品图 + 分镜脚本合成真实视频，请稍候…');
+    App.api.post('/api/video/compose', { videoId: item.id }).then(function (res) {
+      item.videoUrl = res.videoUrl;
+      App.persist();
+      App.ui.toast('成片已生成，点「▶ 预览成片」查看真实视频', 'ok');
+      drawBody();
+    }).catch(function (e) {
+      if (btn) { btn.disabled = false; btn.textContent = '🎬 生成成片'; }
+      App.ui.toast('合成失败：' + (e && e.message || e), 'bad');
+    });
   }
 
   function draw() {
@@ -998,7 +1020,10 @@
         },
         {
           key: 'op', label: '操作', render: function (r) {
-            var h = '<button class="btn btn-sm" data-act="preview" data-vid="' + App.esc(r.id) + '">▶ 预览</button> ';
+            var h = '';
+            // 在线且服务器有 ffmpeg：未出片的显示「生成成片」，出片后显示「已出片」
+            if (ffmpegCap && !r.videoUrl) h += '<button class="btn btn-sm btn-ok" data-act="compose" data-vid="' + App.esc(r.id) + '">🎬 生成成片</button> ';
+            h += '<button class="btn btn-sm" data-act="preview" data-vid="' + App.esc(r.id) + '">▶ 预览' + (r.videoUrl ? '成片' : '') + '</button> ';
             if (r.status === '待审核') h += '<button class="btn btn-sm btn-primary" data-act="approve" data-vid="' + App.esc(r.id) + '">审核发布</button> ';
             if (r.status === '草稿') h += '<button class="btn btn-sm" data-act="edit" data-vid="' + App.esc(r.id) + '">继续编辑</button> ';
             if (r.rows && r.rows.length) h += '<button class="btn btn-sm" data-act="script" data-vid="' + App.esc(r.id) + '">脚本</button> ';
@@ -1029,6 +1054,8 @@
           App.persist();
           draw(); // 刷新 KPI 与列表
           App.ui.toast('已发布（演示环境：正式版对接视频号发布接口）', 'ok');
+        } else if (act === 'compose') {
+          composeVideo(item, b);
         } else if (act === 'preview') {
           previewVideoModal(item);
         } else if (act === 'script') {

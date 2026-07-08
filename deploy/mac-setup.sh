@@ -20,6 +20,7 @@ BREW_PREFIX="$(brew --prefix)"
 echo "==> [2/7] 安装 Node 与 PostgreSQL"
 brew list node >/dev/null 2>&1 || brew install node
 brew list postgresql@16 >/dev/null 2>&1 || brew install postgresql@16
+brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg   # 视频号工厂真实出片引擎
 export PATH="$BREW_PREFIX/opt/postgresql@16/bin:$PATH"
 brew services start postgresql@16 >/dev/null 2>&1 || true
 sleep 3

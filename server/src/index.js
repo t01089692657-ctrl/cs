@@ -28,11 +28,15 @@ app.use('/api/discover', require('./routes/discover'));
 app.use('/api/outreach', require('./routes/outreach'));
 app.use('/api/engine', require('./routes/engine'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/video', require('./routes/video'));
+
+// 合成产物（生成的视频）静态托管
+app.use('/generated', express.static(path.join(__dirname, '..', 'storage')));
 
 // 托管前端：仅放行应用运行所需的静态资源，避免把 cc/数据、cc/资料模板、
 // 内部 .md 文档等敏感文件对外裸奔（这些无需登录即可被下载）。
 var FRONT = path.join(__dirname, '..', '..', 'cc');
-var STATIC_OK = /^\/(js\/|assets\/|favicon)/;
+var STATIC_OK = /^\/(js\/|assets\/|favicon|generated\/)/;
 app.get('/', function (req, res) { res.sendFile(path.join(FRONT, 'index.html')); });
 app.get('/index.html', function (req, res) { res.sendFile(path.join(FRONT, 'index.html')); });
 app.use(function (req, res, next) {
