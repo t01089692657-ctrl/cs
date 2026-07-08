@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS collections (
   name        TEXT PRIMARY KEY,
   data        JSONB NOT NULL,
+  version     INTEGER NOT NULL DEFAULT 0,   -- 乐观锁版本，每次写入 +1
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_by  TEXT
 );

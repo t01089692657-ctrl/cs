@@ -16,14 +16,17 @@ router.use(auth.requireAuth);
 // 保存发信邮箱（授权码不回传前端）
 router.put('/account', ah(async function (req, res) {
   var a = req.body || {};
-  if (!a.email) return res.status(400).json({ error: '请填写邮箱地址' });
+  if (!a.email || typeof a.email !== 'string') return res.status(400).json({ error: '请填写邮箱地址' });
+  // 授权码为空时保留服务端已存的旧授权码，避免“只改发件人名却把授权码清空”
+  var prev = await store.settings.get('email_account') || {};
+  var auth = (a.auth && String(a.auth)) || (prev.email === a.email ? prev.auth : '') || '';
   await store.settings.set('email_account', {
     name: a.name || '', email: a.email,
     host: a.host || '', port: a.port || 465,
-    auth: a.auth || '' // 授权码：仅存服务器端
+    auth: auth // 授权码：仅存服务器端
   });
   await store.audit.log({ user_id: req.user.sub, user_email: req.user.email, action: 'email-account:save', detail: { email: a.email } });
-  res.json({ ok: true });
+  res.json({ ok: true, configured: !!auth });
 }));
 
 router.get('/account', ah(async function (req, res) {

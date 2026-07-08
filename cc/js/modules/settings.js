@@ -349,8 +349,9 @@
       var v = document.getElementById('kn-faq-edit').value.trim();
       if (!v) { App.ui.toast('回答不能为空', 'bad'); return; }
       f.a = v;
+      App.persist();
       App.ui.closeModal();
-      App.ui.toast('回答已更新（演示内存生效），初筛客服 AI 将按新口径应答', 'ok');
+      App.ui.toast('回答已更新，初筛客服 AI 将按新口径应答', 'ok');
       render(rootEl);
     };
   }
@@ -402,8 +403,9 @@
         .filter(function (s) { return s.length > 0; });
       if (!q || !a) { App.ui.toast('问题和回答都不能为空', 'bad'); return; }
       App.data.faq.push({ q: q, a: a, tags: tags.length ? tags : ['未分类'] });
+      App.persist();
       App.ui.closeModal();
-      App.ui.toast('FAQ 已新增（演示内存生效），初筛客服 AI 立即可用', 'ok');
+      App.ui.toast('FAQ 已新增，初筛客服 AI 立即可用', 'ok');
       render(rootEl);
     };
   }
@@ -549,9 +551,10 @@
     body.querySelectorAll('[data-del-red]').forEach(function (x) {
       x.onclick = function () {
         var i = parseInt(x.getAttribute('data-del-red'), 10);
-        if (window.confirm('确认删除这条红线？删除后 AI 将不再受它约束（仅演示内存生效）。')) {
+        if (window.confirm('确认删除这条红线？删除后 AI 将不再受它约束。')) {
           App.data.redlines.splice(i, 1);
-          App.ui.toast('红线已删除（演示内存生效），AI 约束同步更新', 'ok');
+          App.persist();
+          App.ui.toast('红线已删除，AI 约束同步更新', 'ok');
           render(rootEl);
         }
       };
@@ -562,7 +565,8 @@
       var v = inp.value.trim();
       if (!v) { App.ui.toast('请先输入红线内容', 'bad'); return; }
       App.data.redlines.push(v);
-      App.ui.toast('红线已新增（演示内存生效），初筛客服与销冠辅助即时受约束', 'ok');
+      App.persist();
+      App.ui.toast('红线已新增，初筛客服与销冠辅助即时受约束', 'ok');
       render(rootEl);
     }
     body.querySelector('#kn-red-add').onclick = addRedline;

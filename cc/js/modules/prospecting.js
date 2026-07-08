@@ -782,27 +782,36 @@
       var stop = App.ai.thinking(box, '正在通过 ' + acc.email + ' 逐封发送（自动替换个性化字段）…');
       App.services.sendOutreach(acc, items, d0).then(function (res) {
         stop();
+        var isLive = window.App && App.isLive && App.isLive();
+        // 只有“在线部署了、却没配真实发信 SMTP”才是需要警示的假发送；
+        // 纯预览（无后端）本就是演示，保持“已模拟发送”体验。
+        var demoInLive = isLive && res.mode === 'demo';
+        var status = demoInLive ? '待触达' : '已发邮件';
+        var lastAction = demoInLive ? 'D0 待发送（未配置发信邮箱，未真实发出）' : 'D0 开发信已发送（批量）';
         items.forEach(function (r) {
           if (r.added) {
-            // 已录入过的直接更新状态
             for (var i = 0; i < App.data.prospects.length; i++) {
               var p = App.data.prospects[i];
               if (p.company === r.company && p.website === r.website) {
-                p.status = '已发邮件';
-                p.lastAction = 'D0 开发信已发送（批量）';
-                break;
+                p.status = status; p.lastAction = lastAction; break;
               }
             }
           } else {
-            addHarvestProspect(r, '已发邮件', 'D0 开发信已发送（批量）');
+            addHarvestProspect(r, status, lastAction);
           }
-          r.sent = true;
+          r.sent = !demoInLive;  // 仅“在线但未配 SMTP”不算已发，允许配置后重试
         });
         App.persist();
         App.ui.closeModal();
         var bodyEl = document.getElementById('pros-body');
         if (bodyEl && state.tab === 'channels') renderChannels(bodyEl);
-        App.ui.toast('已发送 ' + res.sent + ' 封开发信' + (res.mode === 'demo' ? '（演示模式）' : '') + '，对应公司已进入触达序列', 'ok');
+        if (demoInLive) {
+          App.ui.toast('未真实发出：请先在「登录发信邮箱」填入邮箱与 SMTP 授权码，再重试发送。', 'bad');
+        } else if (res.mode === 'demo') {
+          App.ui.toast('演示模式已模拟发送 ' + res.sent + ' 封，对应公司已进入触达序列', 'ok');
+        } else {
+          App.ui.toast('已发送 ' + res.sent + ' 封' + (res.failed ? '，失败 ' + res.failed + ' 封' : '') + '，对应公司已进入触达序列', 'ok');
+        }
       }).catch(function (e) {
         // 失败要停掉转圈、解锁按钮并提示，避免弹窗永久卡住
         stop();

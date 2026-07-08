@@ -129,6 +129,7 @@
       var owner = document.getElementById('leads-assign-sel').value;
       lead.status = '已分配';
       lead.owner = owner;
+      App.persist();
       App.ui.closeModal();
       App.ui.toast('已将线索「' + lead.name + '」分配给 ' + owner, 'ok');
       paintLeads();
@@ -156,6 +157,7 @@
     };
     App.data.customers.push(cust);
     lead.status = '已转客户';
+    App.persist();
     App.ui.toast('已建档，客户管理中可见', 'ok');
     paintLeads();
   }
@@ -529,6 +531,7 @@
     document.getElementById('crm-st-cancel').onclick = App.ui.closeModal;
     document.getElementById('crm-st-ok').onclick = function () {
       c.stage = target;
+      App.persist();
       App.ui.closeModal();
       App.ui.toast('阶段已更新为「' + target + '」', 'ok');
       paintDetail(c);
@@ -542,6 +545,7 @@
         var i = (c.tags || []).indexOf(t);
         if (i >= 0) {
           c.tags.splice(i, 1);
+          App.persist();
           App.ui.toast('已移除标签：' + t);
           drawTags(c);
         }
@@ -562,6 +566,7 @@
     if (!c.tags) c.tags = [];
     if (c.tags.indexOf(t) >= 0) { App.ui.toast('标签「' + t + '」已存在'); return; }
     c.tags.push(t);
+    App.persist();
     App.ui.toast('已添加标签：' + t, 'ok');
     var input = crmRoot.querySelector('#crm-tag-input');
     if (input) input.value = '';
@@ -604,6 +609,7 @@
       var v = document.getElementById('crm-fu-ta').value.trim();
       if (!v) { App.ui.toast('请填写跟进内容', 'bad'); return; }
       App.data.followups.unshift({ customerId: c.id, date: '今天', by: c.owner, summary: v, next: '' });
+      App.persist();
       App.ui.closeModal();
       App.ui.toast('跟进已记录', 'ok');
       drawTimeline(c);
@@ -646,6 +652,7 @@
         var idx = text.indexOf(marker);
         var next = idx >= 0 ? text.slice(idx + marker.length).trim() : '';
         App.data.followups.unshift({ customerId: c.id, date: '今天', by: c.owner, summary: text, next: next });
+        App.persist();
         App.ui.closeModal();
         App.ui.toast('纪要已存入', 'ok');
         drawTimeline(c);

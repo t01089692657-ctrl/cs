@@ -4,6 +4,7 @@
  */
 'use strict';
 var cfg = require('../config');
+var fetchT = require('./httpx').fetchT;
 
 var OPENAI_COMPATIBLE = {
   openai: { base: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
@@ -29,11 +30,11 @@ async function callOpenAICompatible(provider, messages, opts) {
   var preset = OPENAI_COMPATIBLE[provider] || OPENAI_COMPATIBLE.openai;
   var base = cfg.llm.baseUrl || preset.base;
   var model = cfg.llm.model || preset.model;
-  var res = await fetch(base + '/chat/completions', {
+  var res = await fetchT(base + '/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.llm.key },
     body: JSON.stringify({ model: model, messages: messages, temperature: opts.temperature != null ? opts.temperature : 0.4 })
-  });
+  }, 30000);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   var data = await res.json();
   return data.choices[0].message.content;
@@ -46,7 +47,7 @@ async function callClaude(messages, opts) {
   var sys = messages.filter(function (m) { return m.role === 'system'; }).map(function (m) { return m.content; }).join('\n');
   var msgs = messages.filter(function (m) { return m.role !== 'system'; })
     .map(function (m) { return { role: m.role, content: m.content }; });
-  var res = await fetch(base + '/messages', {
+  var res = await fetchT(base + '/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -54,7 +55,7 @@ async function callClaude(messages, opts) {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({ model: model, system: sys, messages: msgs, max_tokens: opts.maxTokens || 1024 })
-  });
+  }, 30000);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   var data = await res.json();
   return data.content[0].text;

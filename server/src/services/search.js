@@ -5,6 +5,7 @@
  */
 'use strict';
 var cfg = require('../config');
+var fetchT = require('./httpx').fetchT;
 
 var COUNTRY_EN = {
   '美国': 'USA', '加拿大': 'Canada', '澳大利亚': 'Australia', '新西兰': 'New Zealand',
@@ -33,6 +34,8 @@ async function findCompanies(opts) {
   var mode = opts.mode || 'compliant';
   var channels = CHANNEL_QUERIES.filter(function (ch) { return mode === 'full' || ch.compliant; });
 
+  // 演示模式（未配 SerpAPI key）才用合成数据；已配 key 则只返回真实结果，
+  // 即使某些渠道失败也不伪造公司（伪造公司会被当真数据群发开发信）。
   if (!cfg.search.live) return demoCompanies(kw, countries, channels);
 
   var out = [];
@@ -46,13 +49,13 @@ async function findCompanies(opts) {
       });
     } catch (e) { console.warn('[search] ' + ch.channel + ' 失败:', e.message); }
   }
-  return out.length ? out : demoCompanies(kw, countries, channels);
+  return out;  // 真实模式：可能为空，但绝不返回伪造公司
 }
 
 async function serpapi(query) {
   var u = 'https://serpapi.com/search.json?engine=google&num=5&q=' +
     encodeURIComponent(query) + '&api_key=' + encodeURIComponent(cfg.search.serpApiKey);
-  var res = await fetch(u);
+  var res = await fetchT(u, {}, 20000);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   var data = await res.json();
   return (data.organic_results || []).map(function (r) {

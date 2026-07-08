@@ -76,7 +76,9 @@
     },
     setMode: function (m) {
       if (live()) {
-        if (cache.engine) cache.engine.mode = m;
+        // 即使 preload 失败导致 cache.engine 为 null，也建一个兜底对象，保证切换即时生效
+        if (!cache.engine) cache.engine = { mode: 'compliant', ready: false, configured: {} };
+        cache.engine.mode = m;
         App.api.put('/api/engine/mode', { mode: m }).catch(function (e) { App.ui.toast('切换模式失败：' + e.message, 'bad'); });
         return;
       }

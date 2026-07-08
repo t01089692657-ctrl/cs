@@ -45,7 +45,12 @@ window.App = window.App || {};
             api.setToken(''); location.reload();
             throw new Error('登录已过期');
           }
-          if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+          if (!r.ok) {
+            var err = new Error((data && data.error) || ('HTTP ' + r.status));
+            err.status = r.status;   // 供 409 冲突等场景读取
+            err.data = data;
+            throw err;
+          }
           return data;
         });
       });

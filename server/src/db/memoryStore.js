@@ -41,17 +41,27 @@ function createMemoryStore() {
     },
 
     collections: {
+      // 返回 { name: {data, version} }
       async getAll() {
         var out = {};
-        Object.keys(collections).forEach(function (k) { out[k] = collections[k].data; });
+        Object.keys(collections).forEach(function (k) {
+          out[k] = { data: collections[k].data, version: collections[k].version };
+        });
         return out;
       },
       async get(name) {
-        return collections[name] ? collections[name].data : null;
+        return collections[name] ? { data: collections[name].data, version: collections[name].version } : null;
       },
-      async set(name, data, userId) {
-        collections[name] = { data: data, updated_at: new Date().toISOString(), updated_by: userId || null };
-        return data;
+      // 乐观锁：baseVersion 与当前版本不一致时返回 conflict，不覆盖
+      async set(name, data, userId, baseVersion) {
+        var cur = collections[name];
+        var curVer = cur ? cur.version : 0;
+        if (baseVersion != null && baseVersion !== curVer) {
+          return { conflict: true, version: curVer, data: cur ? cur.data : null };
+        }
+        var newVer = curVer + 1;
+        collections[name] = { data: data, version: newVer, updated_at: new Date().toISOString(), updated_by: userId || null };
+        return { ok: true, version: newVer };
       }
     },
 

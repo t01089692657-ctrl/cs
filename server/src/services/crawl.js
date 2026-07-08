@@ -5,6 +5,7 @@
  */
 'use strict';
 var cfg = require('../config');
+var fetchT = require('./httpx').fetchT;
 
 async function scrape(url) {
   if (cfg.crawl.crawl4aiUrl) {
@@ -19,16 +20,19 @@ async function scrape(url) {
       if (md2) return { url: url, markdown: md2, ok: true, engine: 'firecrawl' };
     } catch (e) { console.warn('[crawl] firecrawl 失败:', e.message); }
   }
-  return { url: url, markdown: demoPage(url), ok: false, engine: 'demo' };
+  // 演示模式（未配任何抓取引擎）才返回合成页面；真实模式下抓取失败返回空内容，
+  // 不合成含假邮箱的页面（避免 LLM 从中提取出伪造邮箱）。
+  if (!cfg.crawl.live) return { url: url, markdown: demoPage(url), ok: false, engine: 'demo' };
+  return { url: url, markdown: '', ok: false, engine: 'none' };
 }
 
 async function crawl4ai(url) {
   // Crawl4AI 自建服务（docker 部署，默认 11235 端口）REST 接口
-  var res = await fetch(cfg.crawl.crawl4aiUrl.replace(/\/$/, '') + '/crawl', {
+  var res = await fetchT(cfg.crawl.crawl4aiUrl.replace(/\/$/, '') + '/crawl', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ urls: [url], extraction_type: 'markdown' })
-  });
+  }, 30000);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   var data = await res.json();
   var r = (data.results && data.results[0]) || data;
@@ -36,11 +40,11 @@ async function crawl4ai(url) {
 }
 
 async function firecrawl(url) {
-  var res = await fetch('https://api.firecrawl.dev/v1/scrape', {
+  var res = await fetchT('https://api.firecrawl.dev/v1/scrape', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.crawl.firecrawlKey },
     body: JSON.stringify({ url: url, formats: ['markdown'] })
-  });
+  }, 30000);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   var data = await res.json();
   return (data.data && data.data.markdown) || '';

@@ -47,7 +47,11 @@
   function initTemplates() {
     if (tplInited) return;
     tplInited = true;
-    factoryTpls = JSON.parse(JSON.stringify(App.data.videoTemplates));
+    // 「恢复出厂」应回到真正的内置模板：优先用启动时留存的内置快照，
+    // 避免在线模式下 App.data.videoTemplates 已是被团队改过的服务器值。
+    factoryTpls = (App.builtin && App.builtin.videoTemplates)
+      ? JSON.parse(JSON.stringify(App.builtin.videoTemplates))
+      : JSON.parse(JSON.stringify(App.data.videoTemplates));
     // 在线模式：模板由服务器加载（app.js 启动时已放入 App.data.videoTemplates），此处不读 localStorage
     if (isLive()) return;
     var stored = null;

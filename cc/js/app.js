@@ -35,6 +35,8 @@ window.App = (function () {
 
   App.start = function () {
     App.data = window.AppData;
+    // 在任何加载/覆盖之前，留存内置数据快照（用于「恢复出厂」真正回到内置值）
+    App.builtin = { videoTemplates: JSON.parse(JSON.stringify(App.data.videoTemplates || [])) };
     // 先探测后端：有则在线模式（需登录、数据走服务器），无则演示模式（localStorage）
     (App.api ? App.api.detect() : Promise.resolve(false)).then(function (live) {
       if (live) return startLive();
@@ -72,16 +74,17 @@ window.App = (function () {
       App.api.user = me;
     }).then(function () {
       return App.api.get('/api/collections');
-    }).then(function (cols) {
-      PERSIST_KEYS.forEach(function (k) {
-        if (cols && k in cols && cols[k] != null) App.data[k] = cols[k];
-      });
-      // videoTemplates 也走服务器（模板 10 人共享）
-      if (cols && cols.videoTemplates != null) App.data.videoTemplates = cols.videoTemplates;
-      // 为全部键建立基线快照：服务器已有的用服务器值，服务器没有的用内置默认值。
-      // 这样内置示例数据不会因为用户改了别的集合就被“同步”上去覆盖他人数据，
-      // 只有用户真正改动某集合时，该集合才会被推送。
+    }).then(function (resp) {
+      var data = (resp && resp.data) || {};
+      var versions = (resp && resp.versions) || {};
+      // 服务器已有的集合用服务器值 + 其版本号；服务器没有的用内置默认值、版本 0。
       LIVE_KEYS.forEach(function (k) {
+        if (k in data && data[k] != null) {
+          App.data[k] = data[k];
+          version[k] = versions[k] || 0;
+        } else {
+          version[k] = 0;
+        }
         if (App.data[k] != null) snapshot[k] = JSON.stringify(App.data[k]);
       });
       return App.services && App.services._preload ? App.services._preload() : null;
@@ -98,10 +101,15 @@ window.App = (function () {
    * 演示模式：浏览器 localStorage。
    * 在线模式：只把“变化过的集合”PUT 到服务器（按快照 diff，避免重复上传大图）。
    */
-  var PERSIST_KEYS = ['products', 'videoQueue', 'videoProjects', 'icp', 'prospects'];
+  // 共享业务数据：这些集合在演示模式存 localStorage、在线模式存服务器（10 人共享）
+  var PERSIST_KEYS = ['products', 'videoQueue', 'videoProjects', 'icp', 'prospects',
+    'customers', 'leadsPool', 'followups', 'faq', 'redlines'];
   var LIVE_KEYS = PERSIST_KEYS.concat(['videoTemplates']);
+  // 按 id 合并的集合（并发冲突时可自动三方合并，保住各自新增的行）
+  var ID_MERGE_KEYS = { products: 1, videoTemplates: 1, videoQueue: 1, videoProjects: 1, prospects: 1, customers: 1, leadsPool: 1, followups: 1 };
   var PERSIST_STORE = 'app_data_v1';
-  var snapshot = {};  // 在线模式：key -> 上次已推送内容的 JSON，用于 diff
+  var snapshot = {};  // key -> 上次已同步内容的 JSON（作为并发合并的 base）
+  var version = {};   // key -> 服务器版本号（乐观锁）
 
   function loadPersisted() {
     var s = null;
@@ -113,18 +121,72 @@ window.App = (function () {
     });
   }
 
+  function safeParse(str) { try { return JSON.parse(str); } catch (e) { return null; } }
+  function idOf(x) { return x && x.id != null ? x.id : JSON.stringify(x); }
+
+  // 三方合并（base=上次同步、mine=本地当前、theirs=服务器最新），按 id 合并各自的增删改
+  function mergeById(base, mine, theirs) {
+    if (!Array.isArray(base) || !Array.isArray(mine) || !Array.isArray(theirs)) return null;
+    var baseMap = {}, mineMap = {};
+    base.forEach(function (x) { baseMap[idOf(x)] = x; });
+    mine.forEach(function (x) { mineMap[idOf(x)] = x; });
+    var result = {}, order = [];
+    theirs.forEach(function (x) { var id = idOf(x); result[id] = x; order.push(id); });
+    // 我删除的（base 有、mine 无）：删掉
+    base.forEach(function (x) { var id = idOf(x); if (!(id in mineMap)) delete result[id]; });
+    // 我新增/修改的：覆盖进结果
+    mine.forEach(function (x) {
+      var id = idOf(x);
+      var isNew = !(id in baseMap);
+      var isChanged = !isNew && JSON.stringify(x) !== JSON.stringify(baseMap[id]);
+      if (isNew || isChanged) { result[id] = x; if (order.indexOf(id) < 0) order.push(id); }
+    });
+    return order.filter(function (id) { return id in result; }).map(function (id) { return result[id]; });
+  }
+
+  function pushKeyLive(key) {
+    var cur = JSON.stringify(App.data[key]);
+    if (cur === snapshot[key]) return;
+    App.api.put('/api/collections/' + key, { data: App.data[key], baseVersion: version[key] || 0 })
+      .then(function (r) { version[key] = r.version; snapshot[key] = cur; })
+      .catch(function (e) {
+        if (e && e.status === 409 && e.data) { resolveConflict(key, e.data); }
+        else App.ui.toast('保存到服务器失败（稍后自动重试）：' + e.message, 'bad');
+      });
+  }
+
+  function resolveConflict(key, server) {
+    var base = safeParse(snapshot[key]);
+    var mine = App.data[key];
+    var theirs = server.data;
+    if (ID_MERGE_KEYS[key]) {
+      var merged = mergeById(base, mine, theirs);
+      if (merged) {
+        App.data[key] = merged;
+        version[key] = server.version;
+        snapshot[key] = JSON.stringify(theirs); // 先以 theirs 为 base，成功后再更新
+        App.api.put('/api/collections/' + key, { data: merged, baseVersion: server.version })
+          .then(function (r) { version[key] = r.version; snapshot[key] = JSON.stringify(merged); route(); })
+          .catch(function (e) {
+            if (e && e.status === 409 && e.data) resolveConflict(key, e.data);
+            else App.ui.toast('同步冲突未能自动合并，请刷新页面：' + e.message, 'bad');
+          });
+        return;
+      }
+    }
+    // 非 id 集合（icp/faq/redlines）无法安全合并：采用服务器最新并提示用户重做，避免静默覆盖他人
+    App.data[key] = theirs;
+    version[key] = server.version;
+    snapshot[key] = JSON.stringify(theirs);
+    App.ui.toast('该数据刚被其他同事更新，已为你刷新为最新，请重做本次修改', 'bad');
+    route();
+  }
+
   App.persist = function () {
     if (App.isLive && App.isLive()) {
-      // 只推送变化过的集合；快照仅在保存成功后推进，失败则下次自动重试
       LIVE_KEYS.forEach(function (k) {
         if (App.data[k] == null) return;
-        var cur = JSON.stringify(App.data[k]);
-        if (cur === snapshot[k]) return;
-        (function (key, payload) {
-          App.api.put('/api/collections/' + key, { data: App.data[key] })
-            .then(function () { snapshot[key] = payload; })
-            .catch(function (e) { App.ui.toast('保存到服务器失败（稍后自动重试）：' + e.message, 'bad'); });
-        })(k, cur);
+        pushKeyLive(k);
       });
       return true;
     }

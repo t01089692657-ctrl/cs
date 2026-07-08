@@ -9,8 +9,13 @@ var ah = require('../asyncHandler');
 
 // 登录
 router.post('/login', ah(async function (req, res) {
-  var email = (req.body && req.body.email || '').trim();
-  var password = (req.body && req.body.password) || '';
+  var b = req.body || {};
+  // 类型校验：防止非字符串字段（如 {email:{...}}）触发 .trim() 报 500
+  if (typeof b.email !== 'string' || typeof b.password !== 'string') {
+    return res.status(400).json({ error: '请填写邮箱和密码' });
+  }
+  var email = b.email.trim();
+  var password = b.password;
   if (!email || !password) return res.status(400).json({ error: '请填写邮箱和密码' });
   var user = await store.users.getByEmail(email);
   if (!user || user.active === false || !bcrypt.compareSync(password, user.pass_hash)) {

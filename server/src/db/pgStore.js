@@ -57,22 +57,27 @@ function createPgStore(databaseUrl) {
 
     collections: {
       async getAll() {
-        var rows = await q('SELECT name,data FROM collections');
+        var rows = await q('SELECT name,data,version FROM collections');
         var out = {};
-        rows.forEach(function (r) { out[r.name] = r.data; });
+        rows.forEach(function (r) { out[r.name] = { data: r.data, version: r.version }; });
         return out;
       },
       async get(name) {
-        var rows = await q('SELECT data FROM collections WHERE name=$1', [name]);
-        return rows[0] ? rows[0].data : null;
+        var rows = await q('SELECT data,version FROM collections WHERE name=$1', [name]);
+        return rows[0] ? { data: rows[0].data, version: rows[0].version } : null;
       },
-      async set(name, data, userId) {
-        await q(
-          'INSERT INTO collections (name,data,updated_by,updated_at) VALUES ($1,$2,$3,now()) ' +
-          'ON CONFLICT (name) DO UPDATE SET data=EXCLUDED.data, updated_by=EXCLUDED.updated_by, updated_at=now()',
-          [name, JSON.stringify(data), userId || null]
+      // 乐观锁：仅当当前版本 == baseVersion 时才写入并 version+1；否则返回 conflict + 当前值
+      async set(name, data, userId, baseVersion) {
+        var base = baseVersion == null ? 0 : baseVersion;
+        var rows = await q(
+          'INSERT INTO collections (name,data,version,updated_by,updated_at) VALUES ($1,$2,1,$3,now()) ' +
+          'ON CONFLICT (name) DO UPDATE SET data=EXCLUDED.data, version=collections.version+1, updated_by=EXCLUDED.updated_by, updated_at=now() ' +
+          'WHERE collections.version=$4 RETURNING version',
+          [name, JSON.stringify(data), userId || null, base]
         );
-        return data;
+        if (rows.length) return { ok: true, version: rows[0].version };
+        var cur = await q('SELECT data,version FROM collections WHERE name=$1', [name]);
+        return { conflict: true, version: cur[0] ? cur[0].version : 0, data: cur[0] ? cur[0].data : null };
       }
     },
 
