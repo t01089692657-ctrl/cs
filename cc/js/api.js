@@ -24,7 +24,7 @@ window.App = window.App || {};
       return fetch('/api/health', { method: 'GET' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
-          if (d && d.ok) { api.live = true; api.modes = d.modes; }
+          if (d && d.ok) { api.live = true; api.modes = d.modes; api.getkeUrl = d.getkeUrl || ''; }
           return api.live;
         })
         .catch(function () { api.live = false; return false; });

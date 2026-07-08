@@ -19,7 +19,7 @@ app.use(express.json({ limit: '30mb' }));  // 产品图为 dataURL，放宽体�
 
 // 健康检查 + 各能力运行模式（前端据此判断走后端还是本地演示）
 app.get('/api/health', function (req, res) {
-  res.json({ ok: true, service: 'waimao-fulllink', storage: store.kind, modes: cfg.modes() });
+  res.json({ ok: true, service: 'waimao-fulllink', storage: store.kind, modes: cfg.modes(), getkeUrl: cfg.getkeWebUrl });
 });
 
 app.use('/api/auth', require('./routes/auth'));

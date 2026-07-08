@@ -115,6 +115,15 @@
 
   /* ============ 渲染入口 ============ */
   function render(el) {
+    // 联邦模式：配置了自动获客系统(Python)时，「主动客户开发」直接内嵌它（更强的获客后端）
+    if (window.App && App.isLive && App.isLive() && App.api && App.api.getkeUrl) {
+      var url = App.api.getkeUrl;
+      el.innerHTML =
+        '<div class="notice mb12">「主动客户开发」已接入<b>自动获客系统</b>（多源找客户 → 邮箱验证富化 → 送达率基建 → AI 写信/回复 → CRM）。' +
+        '下方为该系统工作台；如需独立打开：<a href="' + App.esc(url) + '" target="_blank" rel="noopener">在新标签打开 ↗</a></div>' +
+        '<iframe src="' + App.esc(url) + '" style="width:100%;height:calc(100vh - 180px);border:1px solid var(--line);border-radius:10px;background:#fff" title="自动获客系统"></iframe>';
+      return;
+    }
     el.innerHTML =
       '<style>' +
       '.mod-prospecting .w-input{width:84px;padding:4px 8px}' +

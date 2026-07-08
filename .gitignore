@@ -1,0 +1,7 @@
+services/getke/services/api/.venv/
+services/getke/**/__pycache__/
+services/getke/**/*.pyc
+services/getke/**/node_modules/
+services/getke/**/.next/
+services/getke/**/local.db
+services/getke/**/*.egg-info/
