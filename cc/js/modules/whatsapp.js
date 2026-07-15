@@ -491,8 +491,8 @@
     });
   }
 
-  /* ---------- 主渲染 ---------- */
-  function render(el) {
+  /* ---------- 主渲染（演示：模拟会话工作台） ---------- */
+  function renderDemo(el) {
     rootEl = el;
     state.search = '';
     state.sug = null;
@@ -564,6 +564,195 @@
     paintList();
     paintMid();
     paintRight();
+  }
+
+  /* ================= 真实通道B：协议/网页版（扫码挂现有号） ================= */
+  var liveTimer = null;
+  var liveState = { current: null, sending: false };
+  function stopLivePoll() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
+
+  function esc(s) { return App.esc(s); }
+  function fmtTs(ts) {
+    if (!ts) return '';
+    var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  function liveStyles() {
+    return '<style>' +
+      '.mod-wa2{display:flex;flex-direction:column;height:calc(100vh - 130px)}' +
+      '.mod-wa2 .wa2-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}' +
+      '.mod-wa2 .wa2-body{flex:1;display:flex;gap:12px;min-height:0}' +
+      '.mod-wa2 .wa2-list{width:300px;min-width:260px;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow-y:auto}' +
+      '.mod-wa2 .wa2-chat{flex:1;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}' +
+      '.mod-wa2 .wa2-item{padding:11px 13px;border-bottom:1px solid var(--line);cursor:pointer}' +
+      '.mod-wa2 .wa2-item:hover{background:var(--accent-soft)}' +
+      '.mod-wa2 .wa2-item.on{background:var(--accent-soft)}' +
+      '.mod-wa2 .wa2-item .nm{font-weight:600;font-size:13px}' +
+      '.mod-wa2 .wa2-item .ls{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}' +
+      '.mod-wa2 .wa2-msgs{flex:1;overflow-y:auto;background:#efeae2;padding:14px;display:flex;flex-direction:column;gap:8px}' +
+      '.mod-wa2 .wa2-b{max-width:72%;padding:8px 11px;border-radius:10px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word}' +
+      '.mod-wa2 .wa2-b.them{background:#fff;align-self:flex-start}' +
+      '.mod-wa2 .wa2-b.me{background:#d9fdd3;align-self:flex-end}' +
+      '.mod-wa2 .wa2-b .tt{font-size:10px;color:var(--faint);margin-top:3px;text-align:right}' +
+      '.mod-wa2 .wa2-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}' +
+      '.mod-wa2 .wa2-qr{display:flex;flex-direction:column;align-items:center;gap:14px;padding:30px;text-align:center}' +
+      '.mod-wa2 .wa2-qr img{width:240px;height:240px;border:1px solid var(--line);border-radius:8px}' +
+      '.mod-wa2 .wa2-qr .ph{width:240px;height:240px;border:1px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;padding:16px}' +
+      '</style>';
+  }
+
+  function render(el) {
+    rootEl = el;
+    stopLivePoll();
+    // 在线模式且开启了 WhatsApp 通道 → 真实工作台；否则用演示工作台（预览/未开启）
+    if (window.App && App.isLive && App.isLive()) {
+      el.innerHTML = '<div class="mod-wa2"><div class="card">正在加载 WhatsApp 通道…</div></div>';
+      App.api.get('/api/whatsapp/status').then(function (s) {
+        if (s && s.channel && s.channel !== 'off') renderLive(el, s);
+        else renderDemo(el);
+      }).catch(function () { renderDemo(el); });
+      return;
+    }
+    renderDemo(el);
+  }
+
+  function renderLive(el, s) {
+    stopLivePoll();
+    if (s.status !== 'connected') return renderConnect(el, s);
+    renderWorkbench(el, s);
+  }
+
+  /* ---- 未连接：扫码面板 ---- */
+  function renderConnect(el, s) {
+    var inner;
+    if (s.status === 'qr' && s.qr) {
+      var qrHtml = /^data:image/.test(s.qr)
+        ? '<img src="' + esc(s.qr) + '" alt="二维码">'
+        : '<div class="ph">二维码已生成（在能联网的机器上会显示为可扫图片）<br><br>' + esc(String(s.qr).slice(0, 40)) + '…</div>';
+      inner = '<div class="wa2-qr">' + qrHtml +
+        '<div><b>用手机 WhatsApp 扫码登录</b><div class="small muted mt8">手机 WhatsApp → 设置 → 已连接的设备 → 连接设备 → 扫这个码</div></div>' +
+        '<div class="small muted">连接后你现有的号和历史会话会同步过来，可直接在这里收发。</div></div>';
+    } else if (s.status === 'connecting') {
+      inner = '<div class="wa2-qr"><div class="ph">正在连接 WhatsApp…</div></div>';
+    } else {
+      inner = '<div class="wa2-qr"><div class="ph">📱</div>' +
+        '<div><b>连接你的 WhatsApp 号</b><div class="small muted mt8">扫码把现有号挂上来，续用历史会话，销售在国内浏览器直接收发，无需各自开 VPN。</div></div>' +
+        '<button class="btn btn-primary" id="wa2-connect">扫码连接 WhatsApp</button>' +
+        (s.error ? '<div class="small text-bad">' + esc(s.error) + '</div>' : '') + '</div>';
+    }
+    el.innerHTML = liveStyles() + '<div class="mod-wa2">' +
+      '<div class="wa2-bar"><div><b>💬 WhatsApp 工作台 · 协议直连</b> <span class="small muted">通道B：扫码挂现有号</span></div>' +
+      '<span class="badge badge-warn">未连接</span></div>' +
+      '<div class="wa2-body"><div class="wa2-chat">' + inner + '</div></div>' +
+      '<div class="notice mt12">仅用于老客户 1 对 1 维护，请勿群发/高频主动触达，以降低封号风险。</div></div>';
+
+    var btn = el.querySelector('#wa2-connect');
+    if (btn) btn.onclick = function () {
+      btn.disabled = true; btn.textContent = '正在生成二维码…';
+      App.api.post('/api/whatsapp/connect', {}).then(function () { pollConnect(el); })
+        .catch(function (e) { App.ui.toast('连接失败：' + e.message, 'bad'); btn.disabled = false; btn.textContent = '扫码连接 WhatsApp'; });
+    };
+    // qr/connecting 状态下轮询直到连上
+    if (s.status === 'qr' || s.status === 'connecting') pollConnect(el);
+  }
+
+  function pollConnect(el) {
+    stopLivePoll();
+    liveTimer = setInterval(function () {
+      if (!document.body.contains(el)) { stopLivePoll(); return; }
+      App.api.get('/api/whatsapp/status').then(function (s) {
+        if (s.status === 'connected') { stopLivePoll(); renderWorkbench(el, s); }
+        else renderConnectRefresh(el, s);
+      }).catch(function () {});
+    }, 1500);
+  }
+  // 仅刷新二维码区域，避免整页重绑（简单起见直接重画连接面板但不重启轮询）
+  function renderConnectRefresh(el, s) {
+    var body = el.querySelector('.mod-wa2 .wa2-body .wa2-chat');
+    if (!body) { renderConnect(el, s); pollConnect(el); return; }
+    if (s.status === 'qr' && s.qr && /^data:image/.test(s.qr)) {
+      body.innerHTML = '<div class="wa2-qr"><img src="' + esc(s.qr) + '" alt="二维码"><div><b>用手机 WhatsApp 扫码登录</b>' +
+        '<div class="small muted mt8">设置 → 已连接的设备 → 连接设备</div></div></div>';
+    }
+  }
+
+  /* ---- 已连接：真实会话工作台 ---- */
+  function renderWorkbench(el, s) {
+    stopLivePoll();
+    el.innerHTML = liveStyles() + '<div class="mod-wa2">' +
+      '<div class="wa2-bar">' +
+      '<div><b>💬 WhatsApp 工作台 · 协议直连</b> <span class="small muted">已连接：' + esc(s.me && (s.me.name || s.me.id) || '') + '</span></div>' +
+      '<button class="btn btn-sm btn-danger" id="wa2-logout">断开</button></div>' +
+      '<div class="wa2-body">' +
+      '<div class="wa2-list" id="wa2-list"></div>' +
+      '<div class="wa2-chat" id="wa2-chat"><div class="wa2-qr"><div class="ph">← 选择左侧一个会话开始</div></div></div>' +
+      '</div>' +
+      '<div class="notice mt12">仅用于老客户 1 对 1 维护，请勿群发/高频主动触达（系统已限速 ' + Math.round(8) + ' 秒/条），以降低封号风险。</div></div>';
+
+    el.querySelector('#wa2-logout').onclick = function () {
+      if (!window.confirm('确定断开 WhatsApp？断开后需重新扫码。')) return;
+      App.api.post('/api/whatsapp/logout', {}).then(function () { render(el); });
+    };
+    loadChats(el);
+    // 已连接时定时刷新会话/消息（收新消息）
+    liveTimer = setInterval(function () {
+      if (!document.body.contains(el)) { stopLivePoll(); return; }
+      loadChats(el, true);
+      if (liveState.current) loadMessages(el, liveState.current, true);
+    }, 4000);
+  }
+
+  function loadChats(el, quiet) {
+    App.api.get('/api/whatsapp/chats').then(function (d) {
+      var box = el.querySelector('#wa2-list'); if (!box) return;
+      var chats = d.chats || [];
+      if (!chats.length) { box.innerHTML = '<div class="wa2-item"><div class="small muted">暂无会话。对方给你发消息后会出现在这里。</div></div>'; return; }
+      box.innerHTML = chats.map(function (c) {
+        return '<div class="wa2-item' + (liveState.current === c.jid ? ' on' : '') + '" data-jid="' + esc(c.jid) + '">' +
+          '<div class="nm">' + esc(c.name) + '</div><div class="ls">' + esc(c.lastText || '') + '</div></div>';
+      }).join('');
+      box.querySelectorAll('[data-jid]').forEach(function (it) {
+        it.onclick = function () { liveState.current = it.getAttribute('data-jid'); loadChats(el, true); openChat(el, it.getAttribute('data-jid')); };
+      });
+    }).catch(function () {});
+  }
+
+  function openChat(el, jid) {
+    var chat = el.querySelector('#wa2-chat'); if (!chat) return;
+    chat.innerHTML = '<div class="wa2-msgs" id="wa2-msgs"></div>' +
+      '<div class="wa2-input"><textarea class="textarea" id="wa2-text" placeholder="输入消息，回车发送（Shift+回车换行）" style="flex:1;min-height:42px"></textarea>' +
+      '<button class="btn btn-primary" id="wa2-send">发送</button></div>';
+    loadMessages(el, jid);
+    var ta = chat.querySelector('#wa2-text');
+    chat.querySelector('#wa2-send').onclick = function () { doLiveSend(el, jid); };
+    ta.onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doLiveSend(el, jid); } };
+  }
+
+  function loadMessages(el, jid, quiet) {
+    App.api.get('/api/whatsapp/messages?jid=' + encodeURIComponent(jid)).then(function (d) {
+      var box = el.querySelector('#wa2-msgs'); if (!box) return;
+      var atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+      box.innerHTML = (d.messages || []).map(function (m) {
+        return '<div class="wa2-b ' + (m.from === 'me' ? 'me' : 'them') + '">' + esc(m.text) +
+          '<div class="tt">' + fmtTs(m.ts) + '</div></div>';
+      }).join('');
+      if (!quiet || atBottom) box.scrollTop = box.scrollHeight;
+    }).catch(function () {});
+  }
+
+  function doLiveSend(el, jid) {
+    if (liveState.sending) return;
+    var ta = el.querySelector('#wa2-text'); if (!ta) return;
+    var text = ta.value.trim(); if (!text) return;
+    liveState.sending = true;
+    App.api.post('/api/whatsapp/send', { jid: jid, text: text }).then(function () {
+      ta.value = ''; liveState.sending = false;
+      loadMessages(el, jid); loadChats(el, true);
+    }).catch(function (e) {
+      liveState.sending = false;
+      App.ui.toast(e.message, 'bad');   // 含限速提示
+    });
   }
 
   App.registerModule({

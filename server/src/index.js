@@ -29,6 +29,7 @@ app.use('/api/outreach', require('./routes/outreach'));
 app.use('/api/engine', require('./routes/engine'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/video', require('./routes/video'));
+app.use('/api/whatsapp', require('./routes/whatsapp'));
 
 // 合成产物（生成的视频）静态托管
 app.use('/generated', express.static(path.join(__dirname, '..', 'storage')));

@@ -66,6 +66,16 @@ var cfg = {
     get live() { return bool(process.env.VIDEO_API_KEY); }
   },
 
+  // WhatsApp 通道B（协议/网页版，扫码挂现有号）
+  whatsapp: {
+    // off=关闭；baileys=真实协议直连（需装 @whiskeysockets/baileys）；demo=桩演示
+    channel: (process.env.WHATSAPP_CHANNEL || 'off').trim(),
+    sessionDir: (process.env.WHATSAPP_SESSION_DIR || '').trim() || require('path').join(__dirname, '..', 'storage', 'whatsapp'),
+    // 每条消息最小间隔（毫秒），防封：默认 8 秒
+    minSendGapMs: parseInt(process.env.WHATSAPP_MIN_SEND_GAP_MS, 10) || 8000,
+    get live() { return (process.env.WHATSAPP_CHANNEL || 'off').trim() !== 'off'; }
+  },
+
   storage: {
     ossEndpoint: (process.env.OSS_ENDPOINT || '').trim(),
     ossBucket: (process.env.OSS_BUCKET || '').trim(),
